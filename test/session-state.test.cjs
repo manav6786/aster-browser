@@ -71,6 +71,17 @@ test('session preload registration is idempotent and disposal releases listeners
   assert.equal((await pending).timedOut, 1); assert.equal(removed, 1); assert.equal(wc.listenerCount('destroyed'), 0); assert.equal(f.ipcMain.listenerCount(CHANNELS.ready), 0);
 });
 
+test('a targeted close flush captures only that tab and does not wait for another tab', async t => {
+  const f = serviceFixture(); t.after(() => f.service.dispose());
+  const selected = new Contents(), other = new Contents();
+  f.service.attachWebContents(selected, { id: 'selected' }); f.service.attachWebContents(other, { id: 'other' });
+  let otherRequests = 0;
+  selected.mainFrame.onSend = (_channel, payload) => queueMicrotask(() => f.emit(CHANNELS.capture, selected, { ...payload, fields: [field({ value: 'Final selected-tab draft' })] }));
+  other.mainFrame.onSend = () => { otherRequests++; };
+  const result = await f.service.flush({ tabId: 'selected', timeoutMs: 50 });
+  assert.deepEqual(result, { requested: 1, captured: 1, timedOut: 0 }); assert.equal(otherRequests, 0);
+});
+
 function preloadFixture({ saved = documentState(), enabled = true, fields = [], scrollY = 0 } = {}) {
   const listeners = new Map(), timers = new Map(), intervals = new Map(), nodes = [], captures = [], mutations = []; let serial = 0, y = scrollY, x = 0;
   const html = { nodeType: 1, tagName: 'HTML', id: '', parentElement: null, children: [], scrollLeft: 0, scrollTop: 0 };

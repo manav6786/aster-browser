@@ -38,10 +38,10 @@ async function main(){
     }
   });
   await check('Every workspace wraps within three columns; long labels and Add remain accessible',async()=>{
-    const names=['Long Research Workspace Alpha','Reading and Notes','Design Playground','Quiet Studio','Future Ideas'];
+    const names=['Long Research Workspace Alpha','Reading and Notes','Design Playground','Quiet Studio','Future Ideas','Long Engineering Workspace Beta','Saved Reading and Articles','Deep Research Library','Media and Sound Studies','Quiet Personal Archive'];
     for(const name of names){await click('#space-add');await page.locator('#dialog-name').fill(name);await click('#dialog-form button[type="submit"]');await page.locator('#dialog').waitFor({state:'hidden'});await until(async()=>(await state()).workspaces.some(w=>w.name===name),'space saved');}
     await until(async()=>(await page.locator('#spaces [data-action="workspace"]').count())===(await state()).workspaces.length,'all workspaces in selector');
-    const geometry=await page.locator('#spaces').evaluate(el=>({columns:getComputedStyle(el).gridTemplateColumns.split(' ').length,scrollWidth:el.scrollWidth,clientWidth:el.clientWidth,labels:[...el.querySelectorAll('.space-label')].map(n=>({text:n.textContent,scroll:n.scrollWidth,width:n.clientWidth}))}));assert.equal(geometry.columns,3);assert.ok(geometry.scrollWidth<=geometry.clientWidth+1);for(const label of geometry.labels)assert.ok(label.scroll<=label.width+1,label.text+' does not clip');
+    const geometry=await page.locator('#spaces').evaluate(el=>({columns:getComputedStyle(el).gridTemplateColumns.split(' ').length,scrollWidth:el.scrollWidth,clientWidth:el.clientWidth,labels:[...el.querySelectorAll('.space-label')].map(n=>({text:n.textContent,scroll:n.scrollWidth,width:n.clientWidth}))}));assert.equal(geometry.columns,3);assert.ok(geometry.scrollWidth<=geometry.clientWidth+1);for(const label of geometry.labels)assert.ok(label.scroll<=label.width+1,label.text+' does not clip');const rowBounds=await page.locator('#spaces .space-chip').evaluateAll(cells=>cells.flatMap(cell=>{const label=cell.querySelector('.space-label');if(!label)return[];const c=cell.getBoundingClientRect(),l=label.getBoundingClientRect();return[{name:label.textContent,inside:l.top>=c.top-1&&l.bottom<=c.bottom+1}]}));for(const row of rowBounds)assert.ok(row.inside,row.name+' stays inside its grid row');
     const spaces=(await state()).workspaces;for(const space of spaces){await click(`#spaces [data-id="${space.id}"]`);await until(async()=>(await state()).activeWorkspace===space.id,'select '+space.name);await rendered();}
     await screenshot('workspaces-expanded');await click('#sidebar-toggle');await until(async()=>(await state()).settings.sidebarCollapsed,'compact');await pause(650);assert.equal(await page.locator('#spaces').evaluate(el=>getComputedStyle(el).gridTemplateColumns.split(' ').length),1);await click('#space-add');await page.locator('#dialog').waitFor({state:'visible'});await click('[data-action="dialog-close"]');await page.locator('#dialog').waitFor({state:'hidden'});await screenshot('workspaces-compact');await click('#sidebar-toggle');await until(async()=>!(await state()).settings.sidebarCollapsed,'expanded');
   });
@@ -59,6 +59,17 @@ async function main(){
   });
   await check('VPN panel reports the real provider state and refreshes without altering the network',async()=>{
     await click('[data-command="vpn:refresh"]');await until(async()=>(await state()).vpn?.status&&!(await state()).vpn.status.startsWith('checking'),'provider status');const vpn=(await state()).vpn;notes.push({vpnStatus:vpn.status,connected:vpn.connected,modeKind:vpn.modeKind});assert.equal(await page.locator('.vpn-card').getAttribute('data-vpn-status'),vpn.status);if(vpn.connected===true){assert.equal(vpn.status,'connected');assert.equal(vpn.modeKind,'tunnel');}else assert.equal(await page.locator('.vpn-badge.connected').count(),0);if(!vpn.installed)assert.ok(await page.locator('[data-command="vpn:install"]').isVisible());await screenshot('vpn-provider-state');
+  });
+  await check('Mission stays usable with 150 extra internal tabs and bounded keyboard pagination',async()=>{
+    const ids=[];for(let i=0;i<150;i++)ids.push((await invoke('tab:new')).id);
+    await invoke('ui:mission',{open:true});await page.locator('#mission').waitFor({state:'visible'});
+    assert.ok(await page.locator('.mission-page-dots button').count()<=7);
+    const footer=await page.locator('.mission-footer').evaluate(el=>({width:el.clientWidth,scroll:el.scrollWidth}));assert.ok(footer.scroll<=footer.width+1);
+    assert.equal(await page.locator('#mission').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(0, 0, 0)');
+    await page.locator('.mission-page-dots button').last().click();await page.locator('.mission-card').first().waitFor({state:'visible'});
+    await until(async()=>await page.locator('.mission-card').evaluateAll(cards=>cards.every(c=>Number(getComputedStyle(c).opacity)>.98)),'settled mission card entry');await screenshot('mission-scale');
+    await page.locator('.mission-card').first().focus();await page.keyboard.press('Space');await page.locator('#mission').waitFor({state:'hidden'});
+    for(const id of ids)await invoke('tab:close',{id});
   });
   await check('Per-tab audio controls change real tab volume/mute and expose each video for native PiP',async()=>{
     await navigate(origin+'/media');await until(async()=>(await active())?.title==='Live media studio','fixture loaded');

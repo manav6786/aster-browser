@@ -19,7 +19,7 @@ const active=async()=>{const s=await state();return s.tabs.find(t=>t.id===s.acti
 async function renderedActive(){const tab=await active();await page.waitForFunction(tab=>{const el=document.querySelector('.tab[aria-selected="true"]');return el?.dataset.tabId===tab.id&&el.title.endsWith('\n'+tab.url);},tab);}
 async function until(fn,label,timeout=15000){const start=Date.now();while(Date.now()-start<timeout){if(await fn())return;await pause(45);}throw new Error('Timed out: '+label);}
 async function check(name,fn){await fn();results.push({name,passed:true});console.log('PASS',name);}
-async function click(target){const locator=typeof target==='string'?page.locator(target).first():target;await locator.scrollIntoViewIfNeeded();const box=await locator.boundingBox();assert.ok(box&&box.width>=8&&box.height>=8,'visible target bounds');assert.equal(await locator.evaluate(el=>{const r=el.getBoundingClientRect();return el.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));}),true,'actual center hit-test');await locator.click();}
+async function click(target){const locator=typeof target==='string'?page.locator(target).first():target;await locator.scrollIntoViewIfNeeded();await until(()=>locator.evaluate(el=>{const r=el.getBoundingClientRect();return r.width>=8&&r.height>=8&&el.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));}),'actual center hit-test after layout settles',5000);await locator.click();}
 async function nativeKey(keyCode,modifiers=[]){await app.evaluate(({webContents},{keyCode,modifiers})=>{const wc=webContents.getFocusedWebContents();if(!wc)throw new Error('No native focused webContents');wc.sendInputEvent({type:'keyDown',keyCode,modifiers});wc.sendInputEvent({type:'keyUp',keyCode,modifiers});},{keyCode,modifiers});}
 async function focusAddress(){await nativeKey('L',['meta']);await page.waitForFunction(()=>document.hasFocus()&&document.activeElement.id==='address');}
 async function navigate(url){await page.locator('#address').fill(url);await page.locator('#address').press('Enter');await until(async()=>(await active())?.url===url,'navigation '+url);}
@@ -68,14 +68,31 @@ async function main(){
       assert.ok(Math.abs(button.x-slot.x)<2&&Math.abs(button.y-slot.y)<2,'button reaches its slot');assert.ok(button.y>=32&&button.y+button.height<=86,'target remains above native page');assert.ok(Math.abs(button.x-before.x)>50,'button visibly travels');
     }
   });
-  await check('Repeated clicks remain hit-testable and settle to the final requested sidebar state',async()=>{
-    const initial=!!(await state()).settings.sidebarCollapsed;
-    for(let i=0;i<8;i++){
-      const locator=page.locator('#sidebar-toggle'),box=await locator.boundingBox();assert.equal(await locator.evaluate(el=>{const r=el.getBoundingClientRect();return el.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));}),true);
-      await page.mouse.click(box.x+box.width/2,box.y+box.height/2);await pause(38);
-    }
-    await until(async()=>(await state()).settings.sidebarCollapsed===initial,'final rapid toggle state');await pause(650);
-    assert.equal(await page.locator('button[data-action="sidebar"]').count(),1);assert.equal(await page.locator('#sidebar-motion-layer>*').count(),0);
+  await check('Repeated delivered clicks remain hit-testable and settle to the final requested sidebar state',async()=>{
+    const initial=!!(await state()).settings.sidebarCollapsed,attempts=[];
+    await page.evaluate(()=>{
+      window.__sidebarStressClicks=0;
+      window.__sidebarStressListener=event=>{if(event.target.closest('[data-action="sidebar"]'))window.__sidebarStressClicks++;};
+      document.addEventListener('click',window.__sidebarStressListener,true);
+    });
+    try{
+      let delivered=0;
+      for(let attempt=0;attempt<16&&delivered<8;attempt++){
+        // A moving button can leave an earlier boundingBox between protocol
+        // calls. Sample its center and hit-test together; retry a missed
+        // pointer delivery, while still requiring eight real trusted clicks.
+        const probe=await page.locator('#sidebar-toggle').evaluate(el=>{const r=el.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2;return {x,y,hit:el.contains(document.elementFromPoint(x,y))};});
+        assert.equal(probe.hit,true,'moving control remains hit-testable');
+        await page.mouse.click(probe.x,probe.y);await pause(38);
+        const count=await page.evaluate(()=>window.__sidebarStressClicks);
+        assert.ok(count===delivered||count===delivered+1,'one pointer click cannot toggle twice');
+        attempts.push({...probe,delivered:count>delivered});delivered=count;
+      }
+      fs.writeFileSync(path.join(artifacts,'motion-input.json'),JSON.stringify({initial,delivered,attempts},null,2));
+      assert.equal(delivered,8,'eight actual sidebar clicks delivered within bounded attempts');
+      await until(async()=>(await state()).settings.sidebarCollapsed===initial,'final rapid toggle state');await pause(650);
+      assert.equal(await page.locator('button[data-action="sidebar"]').count(),1);assert.equal(await page.locator('#sidebar-motion-layer>*').count(),0);
+    }finally{await page.evaluate(()=>{document.removeEventListener('click',window.__sidebarStressListener,true);delete window.__sidebarStressListener;delete window.__sidebarStressClicks;});}
   });
   await check('Reduced motion has no star particles or travel animations',async()=>{
     await page.emulateMedia({reducedMotion:'reduce'});await click('#sidebar-toggle');await pause(80);

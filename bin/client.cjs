@@ -15,7 +15,11 @@ function createClient(name, transport) {
   }
   async function request(route, body, method = 'POST') {
     if (!config) refreshConfig();
-    const response = await fetch(config.endpoint + route, { method, headers: { Authorization: 'Bearer ' + config.token, 'Content-Type': 'application/json', ...(agentId ? { 'X-Aster-Agent': agentId } : {}) }, ...(method === 'POST' ? { body: JSON.stringify(body || {}) } : {}), signal: AbortSignal.timeout(60000) });
+    const commandBudget = route === '/command' ? Number(body?.params?.timeoutMs) : NaN;
+    // Allow the browser's documented 120-second action budget to finish before
+    // transport expiry. The grace period covers dispatch and the error reply.
+    const requestTimeout = Number.isFinite(commandBudget) ? Math.max(60000, Math.min(120000, Math.max(0, commandBudget)) + 10000) : 60000;
+    const response = await fetch(config.endpoint + route, { method, headers: { Authorization: 'Bearer ' + config.token, 'Content-Type': 'application/json', ...(agentId ? { 'X-Aster-Agent': agentId } : {}) }, ...(method === 'POST' ? { body: JSON.stringify(body || {}) } : {}), signal: AbortSignal.timeout(requestTimeout) });
     const result = await response.json(); if (!response.ok) { const error = new Error(result.error || 'Aster request failed'); error.status = response.status; if (result.details) error.details = result.details; throw error; } return result;
   }
   return {

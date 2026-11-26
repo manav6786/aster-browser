@@ -154,7 +154,9 @@ async function main() {
   await check('rapid background navigation cannot dismiss the human foreground menu',async()=>{
     await invoke('tab:activate',{id:a.id});
     const bg=await invoke('tab:new',{url:origin+'/b'});await invoke('tab:activate',{id:a.id});
+    await window.waitForFunction(id=>document.querySelector('.tab[aria-selected="true"]')?.dataset.tabId===id,a.id);
     await window.locator('.more-button').click();await window.waitForSelector('#floating:not(.hidden)');
+    await until(()=>app.evaluate(({BrowserWindow},url)=>!BrowserWindow.getAllWindows()[0].contentView.children.filter(v=>v.webContents?.getURL()===url).some(v=>v.getVisible()),origin+'/a'),'foreground menu owns the native overlay before background navigation');
     await Promise.all(Array.from({length:20},(_,i)=>invoke('tab:navigate',{id:bg.id,url:origin+'/a?background='+i})));
     const visible=await app.evaluate(({BrowserWindow},url)=>BrowserWindow.getAllWindows()[0].contentView.children.filter(v=>v.webContents?.getURL()===url).some(v=>v.getVisible()),origin+'/a');assert.equal(visible,false,'Background tab navigation unhid the active page over the menu');assert.equal(await window.locator('#floating').isVisible(),true);await window.keyboard.press('Escape');await window.waitForSelector('#floating',{state:'hidden'});
   });

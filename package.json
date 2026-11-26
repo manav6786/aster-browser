@@ -1,7 +1,7 @@
 {
   "name": "aster-browser",
   "productName": "Aster",
-  "version": "0.4.0",
+  "version": "0.4.2",
   "description": "A glassy personal browser with shared native agent control.",
   "main": "src/main/index.cjs",
   "private": true,
@@ -35,7 +35,13 @@
     "test:performance": "node scripts/agent-benchmark.cjs",
     "build:media-preload": "node scripts/build-media-preload.cjs",
     "test:polish": "node scripts/ui-polish-regression.cjs",
-    "test:appearance": "node scripts/appearance-regression.cjs"
+    "test:appearance": "node scripts/appearance-regression.cjs",
+    "test:agent-zoom": "node scripts/agent-zoom-regression.cjs",
+    "test:lifecycle": "node scripts/lifecycle-regression.cjs",
+    "test:accessibility": "node scripts/renderer-accessibility-regression.cjs",
+    "test:client-timeout": "node scripts/client-timeout-regression.cjs",
+    "test:navigation": "node scripts/navigation-regression.cjs",
+    "build:gesture-phases": "node scripts/build-gesture-phases.cjs"
   },
   "dependencies": {
     "@ghostery/adblocker-electron": "2.20.1",

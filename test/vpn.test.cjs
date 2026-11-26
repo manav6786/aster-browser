@@ -42,6 +42,7 @@ test('status parser distinguishes exact provider states and never guesses from a
   assert.equal(parseStatus('Not Connected').status, 'unknown');
   assert.equal(parseStatus('Success').status, 'unknown');
   assert.equal(parseStatus('Status update: Unable to connect\nError reason: blocked').status, 'unable-to-connect');
+  assert.equal(parseStatus('Status update: Unable\nReason: Registration Missing due to: Daemon Startup').status, 'unable');
 });
 
 test('settings parser separates real tunnel, DNS-only and local proxy modes', () => {
@@ -99,6 +100,13 @@ test('daemon/registration setup problems stay explicit and do not trigger first-
   const f = fixture({ daemonMissing: true }); t.after(() => f.controller.dispose());
   const result = await f.controller.refresh(); assert.equal(result.status, 'setup-required'); assert.equal(result.error.code, 'daemon-unavailable');
   await f.controller.connect(); assert.equal(f.mutationCalls().length, 0);
+});
+
+test('successful status commands reporting registration missing remain setup-required and cannot connect', async t => {
+  const f = fixture({ status: 'Unable\nReason: Registration Missing due to: Daemon Startup' }); t.after(() => f.controller.dispose());
+  const result = await f.controller.refresh();
+  assert.equal(result.status,'setup-required');assert.equal(result.connected,false);assert.equal(result.error.code,'setup-required');
+  await f.controller.connect();assert.equal(f.mutationCalls().length,0);
 });
 
 test('device policy lock is respected without invoking an override command', async t => {

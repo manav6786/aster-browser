@@ -11,9 +11,12 @@ const { createSuggestions } = require('./suggestions.cjs');
 const { createNavigationGestures } = require('./navigation-gestures.cjs');
 const { createNativeGlass } = require('./native-glass.cjs');
 const { createVpnController, INSTALL_URL: VPN_INSTALL_URL } = require('./vpn.cjs');
+const { watchVpnStatus } = require('./vpn-status-watch.cjs');
 const { createMediaController } = require('./media.cjs');
 const { createPageAppearance } = require('./page-appearance.cjs');
 const { createSessionState } = require('./session-state.cjs');
+const { PAGE_ENTER_SCRIPT } = require('./page-transition.cjs');
+const { createTabNavigation, remoteURL } = require('./tab-navigation.cjs');
 protocol.registerSchemesAsPrivileged([
   { scheme: 'aster-ui', privileges: { standard: true, secure: true, supportFetchAPI: true } },
   // This scheme serves only inert, engine-approved ad replacement resources.
@@ -27,7 +30,7 @@ if (!app.requestSingleInstanceLock()) { app.quit(); process.exit(0); }
 app.on('second-instance', () => { if (win && !win.isDestroyed()) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } });
 const root = path.join(__dirname, '../..');
 const automationRoot = app.isPackaged ? path.join(process.resourcesPath, 'automation') : path.join(root, 'bin');
-let win, state, automation, shields, saveTimer, stateTimer, agentEngine, suggestions, navigationGestures, layoutTimer, nativeGlass, vpn, media, pageAppearance, sessionState;
+let win, state, automation, shields, saveTimer, stateTimer, agentEngine, suggestions, navigationGestures, layoutTimer, nativeGlass, vpn, vpnStatusWatch, media, pageAppearance, sessionState, tabNavigation;
 let closePreparation=null,closePrepared=false;
 let vibrancyMode='sidebar';
 const accentColors={purple:'#9b7cf6',blue:'#548df4',teal:'#32b9b2',green:'#62b579',amber:'#e7a744',rose:'#e474aa'};
@@ -35,6 +38,8 @@ let overlay = false, shuttingDown = false, closingWindow = false, overlayRequest
 let privatePartition = null;
 let fullscreenTabId = null;
 const views = new Map(), wcTabs = new Map(), queues = new Map(), closedTabs = [];
+const closingTabs = new Map();
+const viewCanvasColors = new WeakMap();
 const leases = new LeaseRegistry();
 const storePath = () => path.join(app.getPath('userData'), 'browser.json');
 const isRemote = tab => tab && (/^https?:/.test(tab.url) || tab.url === 'about:blank');
@@ -42,12 +47,39 @@ const current = () => state.tabs.find(t => t.id === state.activeTabId);
 function requireTab(id = state.activeTabId) { const tab = state.tabs.find(t => t.id === id); if (!tab) throw new Error('Tab not found'); return tab; }
 function ui(command) { if (win && !win.isDestroyed()) win.webContents.send('aster:ui', command); }
 function snapshot(thumbnails = false) {
-  return { ...state, tabs: state.tabs.map(({ thumbnail, navigation, documents, ...t }) => ({ ...t, ...(thumbnails ? { thumbnail } : {}), claim: leases.get(t.id) })), agents: state.agents.map(a => ({ ...a, tabs: state.tabs.filter(t => leases.get(t.id)?.agentId === a.id).map(t => t.id) })) };
+  return { ...state, tabs: state.tabs.map(({ thumbnail, navigation, documents, routeHistory, ...t }) => ({ ...t, ...(thumbnails ? { thumbnail } : {}), claim: leases.get(t.id) })), agents: state.agents.map(a => ({ ...a, tabs: state.tabs.filter(t => leases.get(t.id)?.agentId === a.id).map(t => t.id) })) };
 }
+function navigationContents() { return isRemote(current()) ? views.get(state.activeTabId)?.webContents : win?.webContents; }
+function navigationTab(wc) { return wc===win?.webContents ? current() : state.tabs.find(tab=>tab.id===wcTabs.get(wc?.id)); }
+function navigationModel() {
+  return tabNavigation ||= createTabNavigation({
+    getWebContents:tab=>views.get(tab.id)?.webContents,
+    isAlive:tab=>!shuttingDown&&!closingWindow&&!closePreparation&&state.tabs.includes(tab)&&!closingTabs.has(tab.id),
+    beforeLeave:async tab=>{if(tab.private)return;try{await sessionState?.flush({tabId:tab.id,timeoutMs:1000});}catch(error){console.error('Navigation capture used cached state:',error.message);}},
+    openRoute:openTabRoute,
+    onChange:tab=>{navigationGestures?.update(tab.id===state.activeTabId?navigationContents():views.get(tab.id)?.webContents);layout();publish();}
+  });
+}
+function captureNavigation(tab) { if (!tab.private) navigationModel().capture(tab); }
+function openTabRoute(tab,url,{restore=false,title}={}) {
+  if(!state.tabs.includes(tab)||closingTabs.has(tab.id))return;
+  tab.url=url;tab.error=null;tab.blocked=0;
+  if(isRemote(tab)) {
+    if(restore)destroyView(tab.id);
+    const existed=views.has(tab.id),view=ensureView(tab);
+    if(existed)view.webContents.loadURL(url).catch(()=>{});
+    if(title)tab.title=title;
+  } else {
+    destroyView(tab.id);tab.title=url==='aster://newtab'?'New tab':url.slice(8);tab.isLoading=false;tab.audible=false;tab.pipActive=false;tab.videoCount=0;
+  }
+  if(tab.id===state.activeTabId){overlayRequest++;overlay=false;if(isRemote(tab))views.get(tab.id)?.webContents.focus();else win.webContents.focus();}
+  layout();publish();
+}
+
 function persist() {
   if (!state) return;
   try {
-    for(const tab of state.tabs){const wc=views.get(tab.id)?.webContents;if(tab.private||!wc||wc.isDestroyed()||wc.isLoadingMainFrame())continue;try{tab.navigation={entries:wc.navigationHistory.getAllEntries(),index:wc.navigationHistory.getActiveIndex()};}catch{}}
+    for (const tab of state.tabs) captureNavigation(tab);
     const data = { tabs: state.tabs.filter(t => !t.private).map(({ thumbnail, ...t }) => t), activeTabId:current()?.private?state.lastNormalTabId:state.activeTabId, workspaces: state.workspaces, bookmarks: state.bookmarks, history: state.history.slice(0, 3000), downloads: state.downloads.filter(d => !d.private).slice(0, 1000), settings: state.settings, window:win&&!win.isDestroyed()?{bounds:win.getNormalBounds(),maximized:win.isMaximized()}:state.window, shields: { enabled: state.shields.enabled, blocked: state.shields.blocked } };
     fs.mkdirSync(app.getPath('userData'), { recursive: true });
     try{const previous=fs.readFileSync(storePath(),'utf8');if(Array.isArray(JSON.parse(previous).tabs))fs.writeFileSync(storePath()+'.backup',previous,{mode:0o600});}catch(error){if(error.code==='ENOENT'&&!fs.existsSync(storePath()+'.backup'))fs.writeFileSync(storePath()+'.backup',JSON.stringify(data),{mode:0o600});}
@@ -59,8 +91,15 @@ function publish(save = true) {
   if (save) { clearTimeout(saveTimer); saveTimer = setTimeout(persist, 250); }
 }
 function prepareSessionClose(){
-  if(!closePreparation)closePreparation=(async()=>{try{await sessionState?.flush({timeoutMs:1000});}catch(error){console.error('Final session capture used cached state:',error.message);}persist();closePrepared=true;})();
+  if(!closePreparation)closePreparation=(async()=>{await Promise.allSettled([...closingTabs.values()]);try{await sessionState?.flush({timeoutMs:1000});}catch(error){console.error('Final session capture used cached state:',error.message);}persist();closePrepared=true;})();
   return closePreparation;
+}
+function pageCanvasColor() {
+  return state.settings.theme==='dark'||(state.settings.theme!=='light'&&nativeTheme.shouldUseDarkColors)?'#000000':'#fbfaff';
+}
+function updateViewCanvas(view) {
+  const color=pageCanvasColor();
+  if(viewCanvasColors.get(view)!==color){view.setBackgroundColor(color);viewCanvasColors.set(view,color);}
 }
 function layout(duration = 0) {
   if (!win || win.isDestroyed()) return;
@@ -70,7 +109,7 @@ function layout(duration = 0) {
   const x = state.settings.sidebarCollapsed ? 76 : 246;
   if(nativeGlass){
     const enabled=state.settings.transparency&&!nativeTheme.prefersReducedTransparency;
-    state.nativeGlass={...nativeGlass.update({enabled,dark:nativeTheme.shouldUseDarkColors,accent:accentColors[state.settings.accent]||accentColors.purple,contentBounds:fullscreenTabId?{x:0,y:0,width,height}:{x,y:86,width:Math.max(0,width-x),height:Math.max(0,height-86)},cornerRadius:14}),reducedTransparency:Boolean(nativeTheme.prefersReducedTransparency)};
+    state.nativeGlass={...nativeGlass.update({enabled,dark:nativeTheme.shouldUseDarkColors,accent:accentColors[state.settings.accent]||accentColors.purple,contentBounds:fullscreenTabId?{x:0,y:0,width,height}:{x,y:86,width:Math.max(0,width-x),height:Math.max(0,height-86)},cornerRadius:0}),reducedTransparency:Boolean(nativeTheme.prefersReducedTransparency)};
     // Electron45 removes only its owned NSVisualEffectView here; the source
     // content NSView and our behind-chrome glass host remain attached.
     const fallback=enabled&&!nativeGlass.available?'sidebar':null;
@@ -78,6 +117,7 @@ function layout(duration = 0) {
   }
   const motions=[];
   for (const [id, view] of views) {
+    updateViewCanvas(view);
     const visible = id === state.activeTabId && !overlay && !state.missionOpen && isRemote(current()) && !current()?.error;
     const target=id === fullscreenTabId && visible ? { x: 0, y: 0, width, height } : { x, y: 86, width: Math.max(50, width - x), height: Math.max(50, height - 86) };
     if(duration&&visible&&!fullscreenTabId)motions.push({view,from:view.getBounds(),target});else view.setBounds(target);
@@ -91,9 +131,12 @@ async function captureTab(tab) {
   try { const image = await wc.capturePage(undefined, { stayHidden: true }); if (!image.isEmpty()) tab.thumbnail = image.resize({ width: 480 }).toDataURL(); } catch {}
 }
 async function mission(open) {
+  const generation = ++overlayRequest;
   if (open && !state.missionOpen) await Promise.allSettled(state.tabs.map(captureTab));
-  state.missionOpen = Boolean(open); overlayRequest++; overlay = false; layout(); publish(false);
+  if (generation !== overlayRequest) return false;
+  state.missionOpen = Boolean(open); overlay = false; layout(); publish(false);
   if (open) win.webContents.focus();
+  return true;
 }
 function setupSession(ses) {
   shields.attach(ses);
@@ -150,9 +193,9 @@ function ensureView(tab, popupOptions = null) {
   // Electron has already created popupOptions.webContents to preserve opener,
   // target name, POST data and session identity. Adopt that exact instance.
   const view = new WebContentsView(popupOptions?.webContents ? { webContents: popupOptions.webContents } : { webPreferences: { session: session.fromPartition(tab.private ? privatePartition : 'persist:aster'), nodeIntegration: false, nodeIntegrationInWorker: false, nodeIntegrationInSubFrames: true, preload: undefined, webviewTag: false, contextIsolation: true, sandbox: true, webSecurity: true, allowRunningInsecureContent: false, navigateOnDragDrop: false } });
-  view.setBackgroundColor('#ffffff');
+  updateViewCanvas(view);
   view.setVisible(false);
-  if (view.setBorderRadius) view.setBorderRadius(12);
+  if (view.setBorderRadius) view.setBorderRadius(0);
   const [initialWidth, initialHeight] = win.getContentSize();
   const initialX = state.settings.sidebarCollapsed ? 76 : 246;
   view.setBounds({ x: initialX, y: 86, width: initialWidth - initialX, height: initialHeight - 86 });
@@ -178,7 +221,7 @@ function ensureView(tab, popupOptions = null) {
   wc.on('did-stop-loading', () => { tab.isLoading = false; publish(false); });
   const navigated = (_event, url, _code, _status, isMainFrame = true) => {
     if (!isMainFrame || (!/^https?:/.test(url) && url !== 'about:blank')) return;
-    tab.url = url; tab.canGoBack = wc.navigationHistory.canGoBack(); tab.canGoForward = wc.navigationHistory.canGoForward(); tab.error = null;
+    tab.url = url; navigationModel().committed(tab,wc);navigationGestures?.update(wc);tab.error = null;
     if (!tab.private && /^https?:/.test(url)) { state.history = state.history.filter(h => h.url !== url); state.history.unshift({ id: randomUUID(), title: wc.getTitle() || url, url, visitedAt: Date.now() }); state.history.length = Math.min(state.history.length, 3000); }
     publish();
   };
@@ -197,7 +240,7 @@ function ensureView(tab, popupOptions = null) {
     if (/^https?:/.test(params.linkURL)) items.push({ label: 'Open Link in New Tab', click: () => createTab({ url: params.linkURL, workspace: tab.workspace, private: tab.private }) }, { label: 'Copy Link', click: () => clipboard.writeText(params.linkURL) }, { type: 'separator' });
     if (params.isEditable) items.push({ role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' });
     else if (params.selectionText) items.push({ role: 'copy' });
-    items.push({ label: 'Back', enabled: wc.navigationHistory.canGoBack(), click: () => wc.navigationHistory.goBack() }, { label: 'Reload', click: () => wc.reload() }, { type: 'separator' }, { label: 'Inspect Element', click: () => wc.inspectElement(params.x, params.y) });
+    items.push({ label: 'Back', enabled: navigationModel().availability(tab,wc).canGoBack, click: () => navigationModel().travel(tab,'back') }, { label: 'Reload', click: () => wc.reload() }, { type: 'separator' }, { label: 'Inspect Element', click: () => wc.inspectElement(params.x, params.y) });
     Menu.buildFromTemplate(items).popup({ window: win });
   });
   wc.on('destroyed', () => {
@@ -208,7 +251,7 @@ function ensureView(tab, popupOptions = null) {
   wireShortcuts(wc); wc.setAudioMuted(tab.muted); layout();
   if(!popupOptions){
     const navigation=tab.navigation;
-    if(navigation&&Array.isArray(navigation.entries)&&navigation.entries.length&&navigation.entries.length<=500&&Number.isInteger(navigation.index)&&navigation.index>=0&&navigation.index<navigation.entries.length&&navigation.entries[navigation.index].url===tab.url&&navigation.entries.every(e=>e&&typeof e.url==='string'&&/^https?:/.test(e.url)&&typeof e.title==='string'&&(e.pageState===undefined||(typeof e.pageState==='string'&&e.pageState.length<4194304))))wc.navigationHistory.restore(navigation).catch(()=>{if(!wc.isDestroyed())wc.loadURL(tab.url).catch(()=>{});});
+    if(navigation&&Array.isArray(navigation.entries)&&navigation.entries.length&&navigation.entries.length<=500&&Number.isInteger(navigation.index)&&navigation.index>=0&&navigation.index<navigation.entries.length&&navigation.entries[navigation.index].url===tab.url&&navigation.entries.every(e=>e&&typeof e.url==='string'&&remoteURL(e.url)&&typeof e.title==='string'&&(e.pageState===undefined||(typeof e.pageState==='string'&&e.pageState.length<4194304))))wc.navigationHistory.restore(navigation).catch(()=>{if(!wc.isDestroyed())wc.loadURL(tab.url).catch(()=>{});});
     else wc.loadURL(tab.url).catch(()=>{});
   }
   return view;
@@ -219,16 +262,18 @@ function activate(id) {
   const tab = requireTab(id); state.activeTabId = id; state.activeWorkspace = tab.workspace; state.missionOpen = false; overlayRequest++; overlay = false;
   const workspace=state.workspaces.find(w=>w.id===tab.workspace);if(workspace&&!tab.private)workspace.lastTabId=tab.id;
   if(!tab.private)state.lastNormalTabId=tab.id;
-  const view = ensureView(tab); layout(); publish(); if (view) { view.webContents.focus(); if (!view.webContents.isLoading()) animatePage(view.webContents); } else win.webContents.focus(); return tab;
+  navigationModel().refresh(tab);const view = ensureView(tab);navigationGestures?.update(navigationContents());layout();publish(); if (view) { view.webContents.focus(); if (old?.id!==id&&!view.webContents.isLoading()) animatePage(view.webContents); } else win.webContents.focus(); return tab;
 }
-function animatePage(wc) { wc.executeJavaScript("if(!matchMedia('(prefers-reduced-motion: reduce)').matches)document.documentElement.animate([{opacity:0.5},{opacity:1}],{duration:160,easing:'ease-out'})").catch(() => {}); }
-function createTab(input = {}, focus = true, popupOptions = null) {
+function animatePage(wc) { if(wc.isDestroyed()||fullscreenTabId)return;return wc.executeJavaScript(PAGE_ENTER_SCRIPT).catch(() => {}); }
+function createTab(input = {}, focus = true, popupOptions = null, restoring = false) {
   if (state.tabs.length >= 500) throw new Error('Close a tab before opening more than 500');
   const workspace = state.workspaces.some(w => w.id === input.workspace) ? input.workspace : state.activeWorkspace;
-  const tab = newTab({ url: normalizeURL(input.url, state.settings.searchEngine), workspace, private: Boolean(input.private), pinned: Boolean(input.pinned), muted: Boolean(input.muted) });
-  if (isRemote(tab)) tab.title = new URL(tab.url).hostname || 'Blank tab';
+  const retained = restoring && !input.private ? { volume: Number.isFinite(input.volume) ? Math.max(0, Math.min(1, input.volume)) : 1, navigation: input.navigation, documents: input.documents, routeHistory: input.routeHistory } : {};
+  const tab = newTab({ url: normalizeURL(input.url, state.settings.searchEngine), workspace, private: Boolean(input.private), pinned: Boolean(input.pinned), muted: Boolean(input.muted), ...retained });
+  if (restoring && typeof input.title === 'string') tab.title = input.title;
+  else if (isRemote(tab)) tab.title = new URL(tab.url).hostname || 'Blank tab';
   else tab.title = tab.url === 'aster://newtab' ? 'New tab' : tab.url.slice(8).replace(/^./, c => c.toUpperCase());
-  state.tabs.push(tab); if (popupOptions) ensureView(tab, popupOptions); if (focus) activate(tab.id); else { ensureView(tab); publish(); } return tab;
+  state.tabs.push(tab);navigationModel().refresh(tab); if (popupOptions) ensureView(tab, popupOptions); if (focus) activate(tab.id); else { ensureView(tab); publish(); } return tab;
 }
 function destroyView(id) {
   const view = views.get(id);
@@ -238,19 +283,35 @@ function destroyView(id) {
   // release their per-tab handles. The ownership maps already exclude the tab.
   wcTabs.delete(view.webContents.id); views.delete(id); win.contentView.removeChildView(view); view.webContents.close();
 }
-function closeTab(id = state.activeTabId) {
-  const tab = requireTab(id), index = state.tabs.indexOf(tab);
-  if (!tab.private) closedTabs.unshift({ ...tab, thumbnail: null }); closedTabs.length = Math.min(closedTabs.length, 20);
-  destroyView(id);
-  leases.leases.delete(id); state.tabs.splice(index, 1);
-  if (tab.private && privatePartition && !state.tabs.some(t => t.private)) {
-    const oldSession = session.fromPartition(privatePartition); privatePartition = null;
-    Promise.allSettled([oldSession.clearStorageData(), oldSession.clearCache()]);
-    state.downloads = state.downloads.filter(d => !d.private);
-  }
-  if (!state.tabs.length) return createTab();
-  if (state.activeTabId === id) activate((state.tabs.filter(t => t.workspace === tab.workspace).at(-1) || state.tabs[Math.min(index, state.tabs.length - 1)]).id);
-  publish(); return { closed: id };
+async function closeTab(id = state.activeTabId) {
+  if (closingTabs.has(id)) return closingTabs.get(id);
+  const tab = requireTab(id);
+  // Register ownership before capture can yield or destroy the view. Repeated
+  // closes and the destroyed callback must finish the same operation only once.
+  const pending = Promise.resolve().then(async () => {
+    const wc = views.get(id)?.webContents;
+    if (!tab.private && wc && !wc.isDestroyed()) {
+      captureNavigation(tab);
+      try { await sessionState?.flush({ tabId: id, timeoutMs: 1000 }); }
+      catch (error) { console.error('Closed tab capture used cached state:', error.message); }
+      captureNavigation(tab);
+    }
+    const index = state.tabs.indexOf(tab);
+    if (index < 0) return { closed: id };
+    if (!tab.private) closedTabs.unshift({ ...tab, thumbnail: null }); closedTabs.length = Math.min(closedTabs.length, 20);
+    destroyView(id);
+    leases.leases.delete(id); state.tabs.splice(index, 1);
+    if (tab.private && privatePartition && !state.tabs.some(t => t.private)) {
+      const oldSession = session.fromPartition(privatePartition); privatePartition = null;
+      Promise.allSettled([oldSession.clearStorageData(), oldSession.clearCache()]);
+      state.downloads = state.downloads.filter(d => !d.private);
+    }
+    if (!state.tabs.length) return createTab();
+    if (state.activeTabId === id) activate((state.tabs.filter(t => t.workspace === tab.workspace).at(-1) || state.tabs[Math.min(index, state.tabs.length - 1)]).id);
+    publish(); return { closed: id };
+  });
+  closingTabs.set(id, pending);
+  try { return await pending; } finally { if (closingTabs.get(id) === pending) closingTabs.delete(id); }
 }
 async function command(name, p = {}) {
   if (!p || typeof p !== 'object' || Array.isArray(p)) throw new Error('Command parameters must be an object');
@@ -275,18 +336,14 @@ async function command(name, p = {}) {
   if (name === 'tab:new') return createTab(p);
   if (name === 'tab:activate') return activate(p.id);
   if (name === 'tab:close') return closeTab(p.id);
-  if (name === 'tab:restore') { const tab = closedTabs.shift(); return tab ? createTab(tab) : null; }
+  if (name === 'tab:restore') { await Promise.allSettled([...closingTabs.values()]); const tab = closedTabs.shift(); return tab ? createTab(tab, true, null, true) : null; }
   if (name === 'tab:navigate') {
-    const tab = requireTab(p.id), url = normalizeURL(p.url, state.settings.searchEngine); tab.url = url; tab.error = null; tab.blocked = 0;
-    if (isRemote(tab)) { const existed = views.has(tab.id); const view = ensureView(tab); if (existed) view.webContents.loadURL(url).catch(() => {}); }
-    else { destroyView(tab.id); tab.title = url.slice(8) === 'newtab' ? 'New tab' : url.slice(8); tab.canGoBack = false; tab.canGoForward = false; tab.isLoading = false; }
-    if (tab.id === state.activeTabId) { overlayRequest++; overlay = false; if (isRemote(tab)) views.get(tab.id)?.webContents.focus(); }
-    layout(); publish(); return tab;
+    const tab=requireTab(p.id),url=normalizeURL(p.url,state.settings.searchEngine);
+    await navigationModel().go(tab,url);return tab;
   }
   if (['tab:back', 'tab:forward', 'tab:reload', 'tab:stop', 'tab:mute', 'tab:pin'].includes(name)) {
     const tab = requireTab(p.id), wc = views.get(tab.id)?.webContents;
-    if (name === 'tab:back' && wc?.navigationHistory.canGoBack()) wc.navigationHistory.goBack();
-    if (name === 'tab:forward' && wc?.navigationHistory.canGoForward()) wc.navigationHistory.goForward();
+    if(name==='tab:back'||name==='tab:forward')await navigationModel().travel(tab,name==='tab:back'?'back':'forward');
     if (name === 'tab:reload') { tab.error = null; if (!wc) ensureView(tab); else wc.reload(); }
     if (name === 'tab:stop') wc?.stop();
     if (name === 'tab:mute') { tab.muted = !tab.muted; wc?.setAudioMuted(tab.muted); }
@@ -300,7 +357,7 @@ async function command(name, p = {}) {
   if (name === 'workspace:rename') { const w = state.workspaces.find(w => w.id === p.id); if (!w) throw new Error('Workspace not found'); w.name = String(p.name || 'Untitled').slice(0, 40); publish(); return w; }
   if (name === 'workspace:delete') { if (p.id === 'personal') throw new Error('The Personal workspace is permanent'); state.tabs.filter(t => t.workspace === p.id).forEach(t => { t.workspace = 'personal'; }); state.workspaces = state.workspaces.filter(w => w.id !== p.id); state.activeWorkspace = current().workspace; publish(); return true; }
   if (name === 'ui:overlay') { const generation = ++overlayRequest; if (p.open && isRemote(current())) await captureTab(current()); if (generation !== overlayRequest) return false; overlay = Boolean(p.open); layout(); if (overlay) win.webContents.focus(); else if (!state.missionOpen && isRemote(current()) && !current().error) views.get(state.activeTabId)?.webContents.focus(); publish(false); return true; }
-  if (name === 'ui:mission') { await mission(p.open === undefined ? !state.missionOpen : p.open); return true; }
+  if (name === 'ui:mission') return mission(p.open === undefined ? !state.missionOpen : p.open);
   if (name === 'bookmark:toggle') { const url = p.url || current().url; if (!/^https?:/.test(url)) return false; const found = state.bookmarks.findIndex(b => b.url === url); if (found >= 0) state.bookmarks.splice(found, 1); else state.bookmarks.push({ id: randomUUID(), url, title: String(p.title || current().title).slice(0, 200) }); publish(); return found < 0; }
   if (name === 'history:clear') { state.history = []; publish(); return true; }
   if (name === 'settings:update') {
@@ -331,12 +388,12 @@ function record(agent, action, tabId) {
 }
 async function pageCommand(action,p,tab){return agentEngine.execute(tab,action,p);}
 async function agentCommand(action, p, agent) {
-  if(action==='browser.capabilities')return {name:'Aster',version:app.getVersion(),protocol:1,backgroundInput:true,semanticReferences:true,frames:true,closedShadowDOM:'accessible elements through semantic references',strictSelectors:true,automaticActionability:true,batch:{maxSteps:32,scope:'one tab',replay:false},media:{pictureInPicture:true,tabVolume:true},transports:['MCP','CLI','HTTP'],trustedAgentsShareAllTabs:true};
+  if(action==='browser.capabilities')return {name:'Aster',version:app.getVersion(),protocol:1,navigationGestures:navigationGestures?.getState(),backgroundInput:true,semanticReferences:true,frames:true,closedShadowDOM:'accessible elements through semantic references',strictSelectors:true,automaticActionability:true,batch:{maxSteps:32,scope:'one tab',replay:false},media:{pictureInPicture:true,tabVolume:true},transports:['MCP','CLI','HTTP'],trustedAgentsShareAllTabs:true};
   if (action === 'browser.state') return snapshot();
   if (action === 'tabs.list') return snapshot().tabs.map(({ thumbnail, ...t }) => t);
   if (action === 'events.list') return state.activity.slice(0, Math.min(150, Number(p.limit) || 50));
   if (action === 'tabs.create') { const tab = createTab(p, p.active !== false); record(agent, action, tab.id); return tab; }
-  if (action === 'browser.mission') { await mission(p.open !== false); record(agent, action); return true; }
+  if (action === 'browser.mission') { const result = await mission(p.open !== false); record(agent, action); return result; }
   const id = p.tabId || p.id;
   if (!id) throw new Error('An explicit tabId is required so agents do not interfere with the human’s active tab');
   const run = async () => {
@@ -346,7 +403,7 @@ async function agentCommand(action, p, agent) {
     const mapping = { 'tabs.activate': 'tab:activate', 'tabs.close': 'tab:close', 'tabs.navigate': 'tab:navigate', 'tabs.reload': 'tab:reload', 'tabs.back': 'tab:back', 'tabs.forward': 'tab:forward', 'tabs.move': 'tab:move','tabs.media':'media:get','tabs.volume':'tab:volume','tabs.pip':'tab:pip' };
     if (!mapping[action] && !['page.snapshot','page.screenshot','page.evaluate','page.click','page.type','page.key','page.scroll','page.inspect','page.frames','page.waitFor','page.batch','page.select','page.check'].includes(action)) throw new Error('Unknown agent action: ' + action);
     const readOnly = ['page.snapshot','page.screenshot','page.inspect','page.frames','page.waitFor','tabs.media'].includes(action);
-    if (!readOnly) leases.claim(id, agent.id);
+    if (!readOnly) leases.claim(id, agent.id, 30000, { preserveLonger: true });
     let result;
     if (action.startsWith('page.')) result = await pageCommand(action, p, tab);
     else result = await command(mapping[action], { ...p, id });
@@ -369,16 +426,21 @@ function buildMenu() {
 }
 app.whenReady().then(async () => {
   let saved = {}; try { saved = JSON.parse(fs.readFileSync(storePath())); } catch {try{saved=JSON.parse(fs.readFileSync(storePath()+'.backup'));}catch{}}
-  state = initialState(saved); nativeTheme.themeSource = state.settings.theme;
+  state = initialState(saved);for(const tab of state.tabs)navigationModel().refresh(tab); nativeTheme.themeSource = state.settings.theme;
   media=createMediaController({ipcMain,onChange:(wc,next)=>{const tab=state.tabs.find(t=>t.id===wcTabs.get(wc.id));if(!tab)return;tab.pipActive=next.pipActive;tab.videoCount=next.videoCount;tab.audible=next.audible;publish(false);}});
   pageAppearance=createPageAppearance({ipcMain,getSettings:()=>state.settings});
   sessionState=createSessionState({ipcMain,onChange:()=>{clearTimeout(saveTimer);saveTimer=setTimeout(persist,250);}});
   vpn=createVpnController({onState:next=>{state.vpn=next;publish(false);}});state.vpn=vpn.getState();vpn.refresh().catch(error=>console.error('VPN status unavailable:',error.message));
   suggestions=createSuggestions({snapshot:()=>snapshot(),current});
-  navigationGestures=createNavigationGestures({ipcMain,currentWebContents:()=>views.get(state.activeTabId)?.webContents,canHandle:()=>!overlay&&!state.missionOpen&&!current()?.error});
+  navigationGestures=createNavigationGestures({ipcMain,currentWebContents:navigationContents,canHandle:()=>!overlay&&!state.missionOpen&&!current()?.error,
+    availabilityForWebContents:wc=>{const tab=navigationTab(wc);return tab?navigationModel().availability(tab,wc===win?.webContents?null:wc):{canGoBack:false,canGoForward:false};},
+    navigate:(wc,direction)=>{const tab=navigationTab(wc);return tab?navigationModel().travel(tab,direction):false;},
+    navigationContextForWebContents:wc=>{const tab=navigationTab(wc);return tab?tab.id+':'+tab.url:null;}
+  });
+  navigationGestures.attachSession(session.defaultSession);
   protocol.handle('aster-ui', request => {
     const target = new URL(request.url); const name = target.pathname.replace(/^\//, '');
-    if (target.hostname !== 'shell' || !['index.html', 'style.css', 'app.js'].includes(name)) return new Response('Not found', { status: 404 });
+    if (target.hostname !== 'shell' || !['index.html', 'style.css', 'orb.css', 'app.js', 'art/orb-glass.webp'].includes(name)) return new Response('Not found', { status: 404 });
     return net.fetch(pathToFileURL(path.join(root, 'src/renderer', name)).href);
   });
   const { installShields } = require('./shields.cjs');
@@ -388,8 +450,9 @@ app.whenReady().then(async () => {
   if(oldBounds&&['x','y','width','height'].every(k=>Number.isFinite(oldBounds[k]))){const area=screen.getDisplayMatching(oldBounds).workArea;const width=Math.max(1050,Math.min(oldBounds.width,area.width)),height=Math.max(700,Math.min(oldBounds.height,area.height));windowBounds={width:Math.round(width),height:Math.round(height),x:Math.round(Math.max(area.x,Math.min(oldBounds.x,area.x+area.width-width))),y:Math.round(Math.max(area.y,Math.min(oldBounds.y,area.y+area.height-height)))};}
   win = new BrowserWindow({ ...windowBounds, minWidth: 1050, minHeight: 700, title: 'Aster', titleBarStyle: 'hidden', trafficLightPosition: { x: 20, y: 20 }, vibrancy: 'sidebar', visualEffectState: 'active', backgroundColor: '#00000000', show: false, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true } });
   nativeGlass=createNativeGlass({win});state.nativeGlass=nativeGlass.status;
+  vpnStatusWatch=watchVpnStatus(win,{refresh:()=>vpn.refresh()});
   nativeTheme.on('updated',()=>{layout();publish(false);});
-  navigationGestures.attachWindow(win);
+  navigationGestures.attachWindow(win);navigationGestures.attachWebContents(win.webContents,{shell:true});
   agentEngine=createAgentEngine({ensureView,isHtmlFullscreen:wc=>wcTabs.get(wc.id)===fullscreenTabId,captureFocus:()=>({contents:webContents.getFocusedWebContents(),activeId:state.activeTabId,focused:win.isFocused()}),restoreFocus:(saved,target)=>{if(saved?.focused&&win.isFocused()&&saved.activeId===state.activeTabId&&saved.contents&&!saved.contents.isDestroyed()&&target!==saved.contents)saved.contents.focus();}});
   win.webContents.on('will-navigate', event => event.preventDefault()); win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   let shellRecoveries = [];
@@ -405,6 +468,8 @@ app.whenReady().then(async () => {
   automation = await startAutomation({ directory: app.getPath('userData'), command: agentCommand, connect: agent => { state.agents.push(agent); publish(false); }, disconnect: id => { state.agents = state.agents.filter(a => a.id !== id); leases.releaseAgent(id); publish(false); } });
   state.automation = { endpoint: automation.endpoint, tokenPath: automation.tokenPath, mcpPath: path.join(automationRoot, 'aster-mcp.cjs'), cliPath: path.join(automationRoot, 'aster.cjs') };
   win.on('resize', layout); win.on('enter-full-screen', layout); win.on('leave-full-screen', layout);
+  const publishWindowVisibility=()=>ui({command:'window-visibility',visible:win.isVisible()&&!win.isMinimized()});
+  for(const event of ['show','hide','minimize','restore'])win.on(event,publishWindowVisibility);
   win.on('close', event => {
     if(!closePrepared){event.preventDefault();void prepareSessionClose().then(()=>{if(!win.isDestroyed())win.close();});return;}
     closingWindow = true; persist(); for (const view of views.values()) if (!view.webContents.isDestroyed()) view.webContents.close(); views.clear();
@@ -417,5 +482,5 @@ app.whenReady().then(async () => {
 app.on('window-all-closed', () => app.quit());
 app.on('before-quit', event => {
   if(!closePrepared&&win&&!win.isDestroyed()){event.preventDefault();void prepareSessionClose().then(()=>app.quit());return;}
-  if (shuttingDown) return; shuttingDown = true; clearTimeout(saveTimer); clearTimeout(stateTimer);clearTimeout(layoutTimer);persist();sessionState?.dispose();suggestions?.dispose();navigationGestures?.dispose();agentEngine?.dispose();media?.dispose();pageAppearance?.dispose();nativeGlass?.dispose();vpn?.dispose();automation?.close();
+  if (shuttingDown) return; shuttingDown = true; clearTimeout(saveTimer); clearTimeout(stateTimer);clearTimeout(layoutTimer);persist();sessionState?.dispose();suggestions?.dispose();navigationGestures?.dispose();agentEngine?.dispose();media?.dispose();pageAppearance?.dispose();nativeGlass?.dispose();vpnStatusWatch?.dispose();vpn?.dispose();automation?.close();
 });

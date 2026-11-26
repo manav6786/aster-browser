@@ -313,7 +313,9 @@ function createAgentEngine({ ensureView, isHtmlFullscreen = () => false, capture
       }
       if(action==='page.check'&&typeof node.info.checked!=='boolean')throw new Error('Target is not a checkbox or radio');
       if(action==='page.check'&&node.info.checked===(p.checked!==false))return {ok:true,checked:node.info.checked};
-      const point={x:Math.round(rawPoint.x),y:Math.round(rawPoint.y)};check(ctx);
+      // DOM geometry uses page CSS pixels; Electron native mouse input uses
+      // view points, so browser page zoom must be applied exactly once.
+      const zoom=state.wc.getZoomFactor(),point={x:Math.round(rawPoint.x*zoom),y:Math.round(rawPoint.y*zoom)};check(ctx);
       if(node.frame.sessionId){
         // A hidden out-of-process frame has no root-window compositor hit
         // target. Inject through its own session in local widget coordinates.

@@ -58,10 +58,11 @@ function initialState(saved = {}) {
 class LeaseRegistry {
   constructor(now = Date.now) { this.now = now; this.leases = new Map(); }
   get(id) { const lease = this.leases.get(id); if (lease && lease.expiresAt <= this.now()) { this.leases.delete(id); return null; } return lease || null; }
-  claim(id, agentId, ttl = 30000) {
+  claim(id, agentId, ttl = 30000, { preserveLonger = false } = {}) {
     const existing = this.get(id);
     if (existing && existing.agentId !== agentId) throw new Error('Tab is claimed by another agent; use a separate tab or wait for its claim to expire');
-    const lease = { agentId, expiresAt: this.now() + Math.min(120000, Math.max(1000, Number(ttl) || 30000)) };
+    const expiresAt = this.now() + Math.min(120000, Math.max(1000, Number(ttl) || 30000));
+    const lease = { agentId, expiresAt: preserveLonger ? Math.max(expiresAt, existing?.expiresAt || 0) : expiresAt };
     this.leases.set(id, lease); return lease;
   }
   release(id, agentId) { const lease = this.get(id); if (lease && lease.agentId !== agentId) throw new Error('Only the owner can release this tab'); this.leases.delete(id); }

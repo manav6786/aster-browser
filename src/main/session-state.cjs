@@ -109,10 +109,10 @@ function createSessionState({ ipcMain, onChange = () => {} }) {
     };
     contents.set(wc, { tab, destroyed }); wc.once('destroyed', destroyed);
   }
-  async function flush({ timeoutMs = 1000 } = {}) {
+  async function flush({ timeoutMs = 1000, tabId } = {}) {
     if (disposed) return { requested: 0, captured: 0, timedOut: 0 };
     const frames = new Map();
-    for (const [wc, record] of contents) { if (record.tab.private || wc.isDestroyed()) continue; try { for (const frame of wc.mainFrame.framesInSubtree) if (identity(wc, frame, frame.url)) frames.set(frame, wc); } catch {} }
+    for (const [wc, record] of contents) { if (record.tab.private || wc.isDestroyed() || (tabId !== undefined && record.tab.id !== tabId)) continue; try { for (const frame of wc.mainFrame.framesInSubtree) if (identity(wc, frame, frame.url)) frames.set(frame, wc); } catch {} }
     if (!frames.size) return { requested: 0, captured: 0, timedOut: 0 };
     const id = randomUUID(), requested = frames.size;
     return new Promise(resolve => {

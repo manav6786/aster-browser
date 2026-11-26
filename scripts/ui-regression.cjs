@@ -55,7 +55,7 @@ async function main() {
   window = await app.firstWindow();
   window.on('pageerror',e=>errors.push(e.message));
   app.process().stderr.on('data',d=>fs.appendFileSync(path.join(artifacts,'ui-stderr.log'),d));
-  await window.waitForFunction(()=>window.aster && document.body.innerText.includes('Room to explore'));
+  await window.waitForFunction(()=>window.aster && document.querySelector('#home-search'));
   await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].setSize(1050,700));
   await check('Compact sidebar can always be reopened by a visible, hit-tested toolbar button', async()=>{
     for(let i=0;i<4;i++){await click('#sidebar-toggle');await until(async()=>(await state()).settings.sidebarCollapsed,'collapsed');await click('#sidebar-toggle');await until(async()=>!(await state()).settings.sidebarCollapsed,'expanded');}

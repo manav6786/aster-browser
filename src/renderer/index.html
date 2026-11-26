@@ -6,18 +6,19 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'none'; object-src 'none'; frame-src 'none'">
   <title>Aster</title>
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="orb.css">
 </head>
 <body>
   <div id="app">
     <aside id="browser-sidebar" class="sidebar" aria-label="Browser sidebar">
-      <div class="window-drag"><span class="drag-name">ASTER BROWSER</span></div>
+      <div class="window-drag"></div>
       <div class="brand"><span class="brand-symbol" aria-hidden="true">✳</span><span class="brand-name">aster<span class="brand-dot">.</span></span><span id="sidebar-brand-slot" class="sidebar-toggle-slot brand-toggle-slot" aria-hidden="true"></span></div>
       <div id="spaces" class="spaces"></div>
       <button class="new-tab" data-action="new"><span class="new-icon">＋</span><span class="expanded">New tab</span><kbd class="expanded">⌘ T</kbd></button>
       <div class="section-label"><span class="expanded">YOUR TABS</span><button class="icon-button tiny" data-action="mission" title="Mission Control · ⌘⇧M" aria-label="Open Mission Control"></button></div>
       <div id="tabs" class="tabs" role="tablist" aria-label="Open tabs"></div>
       <div class="sidebar-bottom">
-        <button class="team-card" data-action="route" data-route="agents"><span class="team-symbol"></span><span class="team-copy"><strong>Your browser. Your team.</strong><span id="team-description">Connect your first agent</span></span><span class="team-chevron">↗</span></button>
+        <button class="team-card" data-action="route" data-route="agents"><span class="team-symbol"></span><span class="team-copy"><strong>Agents</strong><span id="team-description">Connect your first agent</span></span><span class="team-chevron">↗</span></button>
         <div class="sidebar-tools"><button class="icon-button" data-action="route" data-route="bookmarks" title="Bookmarks" aria-label="Bookmarks"></button><button class="icon-button" data-action="route" data-route="history" title="History" aria-label="History"></button><button class="icon-button" data-action="route" data-route="downloads" title="Downloads" aria-label="Downloads"></button><span class="tool-spacer"></span><button class="icon-button" data-action="route" data-route="settings" title="Settings" aria-label="Settings"></button></div>
       </div>
     </aside>
@@ -25,7 +26,7 @@
     <div id="sidebar-motion-layer" aria-hidden="true"></div>
     <div id="interaction-motion-layer" aria-hidden="true"></div>
     <header class="toolbar">
-      <div class="titlebar-drag"><span id="workspace-title">Personal space</span><span class="titlebar-center">A little space for everything.</span><button class="privacy-status" data-action="shields"><i></i><span id="privacy-label">Protection on</span></button></div>
+      <div class="titlebar-drag" aria-hidden="true"></div>
       <div class="navigation"><span id="sidebar-toolbar-slot" class="sidebar-toggle-slot toolbar-toggle-slot" aria-hidden="true"></span><div class="nav-buttons"><button id="back" class="icon-button" data-action="back" title="Back · ⌘[" aria-label="Back"></button><button id="forward" class="icon-button" data-action="forward" title="Forward · ⌘]" aria-label="Forward"></button><button id="reload" class="icon-button" data-action="reload" title="Reload · ⌘R" aria-label="Reload"></button></div><form id="address-form" class="address-bar"><span id="address-icon"></span><input id="address" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="search-suggestions" aria-label="Address or search" placeholder="Search or enter a URL" autocomplete="off" spellcheck="false"><kbd id="address-shortcut">⌘ L</kbd><button type="button" class="address-bookmark icon-button tiny" data-action="bookmark" title="Bookmark this page · ⌘D" aria-label="Bookmark this page"></button></form><button id="shields-button" class="icon-button shield-button" data-action="shields" title="Privacy protection" aria-label="Privacy protection"></button><button class="icon-button mission-button" data-action="mission" title="Mission Control · ⌘⇧M" aria-label="Mission Control"></button><button class="icon-button more-button" data-action="menu" title="Browser menu" aria-label="Browser menu"></button></div>
     </header>
     <main id="content" class="content"></main>

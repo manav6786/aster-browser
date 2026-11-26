@@ -27,7 +27,7 @@ async function main() {
   browser.process().stderr.on('data', data => fs.appendFileSync(path.join(work, 'integration-stderr.log'), data));
   const window = await browser.firstWindow();
   const errors = []; window.on('pageerror', error => errors.push(error.message));
-  await window.waitForFunction(() => window.aster && document.body.innerText.includes('Room to explore'), { timeout: 30000 });
+  await window.waitForFunction(() => window.aster && document.querySelector('#home-search'), { timeout: 30000 });
   await until(() => fs.existsSync(path.join(profile, 'automation.json')), 'automation startup');
   const config = JSON.parse(fs.readFileSync(path.join(profile, 'automation.json')));
   const headers = { Authorization: 'Bearer ' + config.token, 'Content-Type': 'application/json' };

@@ -176,7 +176,7 @@ async function main() {
   delete options.env.ELECTRON_RUN_AS_NODE;
   app = await _electron.launch(options); shell = await app.firstWindow(); shell.on('pageerror', error => errors.push(error.message));
   app.process().stderr.on('data', data => fs.appendFileSync(path.join(work, 'gestures-stderr.log'), data));
-  await shell.waitForFunction(() => window.aster && document.body.innerText.includes('Room to explore'));
+  await shell.waitForFunction(() => window.aster && document.querySelector('#home-search'));
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1280, 900));
   if (process.platform !== 'darwin') throw new Error('This integrated fixture requires macOS; gesture navigation is intentionally disabled on other platforms.');
   const normal = await create('regular');
