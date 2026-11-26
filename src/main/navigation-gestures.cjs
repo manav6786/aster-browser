@@ -111,10 +111,10 @@ function createNavigationGestures({ ipcMain, currentWebContents, canHandle = () 
     const record = { wheel: new WheelNavigation({ now }), pinch: false, shell, listeners: [] }; contents.set(wc, record);
     const listen = (event, callback) => { wc.on(event, callback); record.listeners.push([event, callback]); };
     function pinchLimits() {
-      if (wc.isDestroyed() || platform !== 'darwin' || shell) return;
-      // Chromium handles pinch scale/anchor/scroll itself. input-event contains
-      // no scale delta in Electron 45, so never translate it into layout zoom.
-      try { Promise.resolve(wc.setVisualZoomLevelLimits(1, 5)).catch(onError); } catch (error) { onError(error); }
+      if (wc.isDestroyed()) return;
+      // Fix visual scale for both pages and chrome. Keep pinch input out of
+      // history recognition; it must neither magnify nor become a Back swipe.
+      try { Promise.resolve(wc.setVisualZoomLevelLimits(1, 1)).catch(onError); } catch (error) { onError(error); }
     }
     if (!shell) try { wc.setZoomMode?.('isolated'); } catch (error) { onError(error); }
     listen('dom-ready', () => { record.wheel.reset(); record.pinch = false; pinchLimits(); update(wc); });

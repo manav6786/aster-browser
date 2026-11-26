@@ -1,7 +1,7 @@
 {
   "name": "aster-browser",
   "productName": "Aster",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "A glassy personal browser with shared native agent control.",
   "main": "src/main/index.cjs",
   "private": true,

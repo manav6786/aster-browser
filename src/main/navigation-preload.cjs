@@ -2,7 +2,7 @@
 const { ipcRenderer } = require('electron');
 
 // No page-facing bridge. A remote page cannot manufacture trusted wheel input
-// or invoke this preload's IPC. Native pinch and page scrolling remain intact.
+// or invoke this preload's IPC. Page scrolling remains Chromium-owned.
 const browserShell = location.href === 'aster-ui://shell/index.html';
 if (window === window.top && (/^https?:/.test(location.href) || browserShell)) {
   const READY = 'aster:gestures:ready', WHEEL = 'aster:gestures:wheel', STATE = 'aster:gestures:state';

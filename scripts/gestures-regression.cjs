@@ -19,7 +19,7 @@ const ownedContents = new Set();
 const boundary = {
   input: 'Input.dispatchMouseEvent mouseWheel; effects and DOM isTrusted are asserted',
   focus: 'Native window/webContents are focused; Playwright focus emulation is explicitly disabled before every scenario',
-  pinch: 'Input.synthesizePinchGesture through Chromium, if supported; visual viewport scale is asserted independently from layout zoom',
+  pinch: 'Input.synthesizePinchGesture through Chromium, if supported; visual scale must remain 1 on normal/private pages and the home shell; layout zoom is checked separately',
   physicalTrackpad: 'Not exercised. DOM wheel lacks native finger count, NSEvent phases and momentum metadata. Synthetic success is not physical-trackpad evidence.',
   legacySwipe: 'Not synthesized: emitting BrowserWindow swipe would test only an EventEmitter, not a macOS gesture.'
 };
@@ -146,26 +146,24 @@ async function trustedWheels(tab, minimum = 3) {
   assert.ok(wheel.every(e => e.trusted && e.mode === 0), 'Chromium must produce trusted pixel wheel events');
   return wheel;
 }
-async function pinch(tab) {
-  await prepare(tab);
+async function pinchDisabled(tab, point) {
   const before = await evaluate(tab, '({scale:visualViewport.scale,width:innerWidth,scrollX,scrollY})');
-  const layout = (await nativeStatus(tab)).zoomFactor, p = await point(tab, '#edge');
-  try {
-    await cdp(tab, 'Input.synthesizePinchGesture', { ...p, scaleFactor: 1.5, relativeSpeed: 800, gestureSourceType: 'touch' });
-  } catch (error) {
-    if (/not supported|not implemented|method.*not found|unknown method|unsupported/i.test(error.message)) {
-      return { skipped: true, reason: error.message, before, note: 'Native physical pinch remains unverified; no alternative scale setter counts as a pass.' };
+  const layout = (await nativeStatus(tab)).zoomFactor, samples = [];
+  assert.ok(Math.abs(before.scale - 1) < .001, 'Fixture starts at normal visual scale');
+  for (const scaleFactor of [1.5, 0.7]) {
+    await cdp(tab, 'Input.synthesizePinchGesture', { ...point, scaleFactor, relativeSpeed: 800, gestureSourceType: 'touch' });
+    for (let sample = 0; sample < 8; sample++) {
+      const value = await evaluate(tab, '({scale:visualViewport.scale,width:innerWidth,scrollX,scrollY})');
+      samples.push({ requestedScale: scaleFactor, ...value });
+      assert.ok(Math.abs(value.scale - 1) < .001, 'Pinch must leave visual scale at 1');
+      assert.equal(value.width, before.width, 'Pinch must preserve layout width');
+      await sleep(40);
     }
-    throw error;
   }
-  const after = await until(async () => { const s = await evaluate(tab, '({scale:visualViewport.scale,width:innerWidth,scrollX,scrollY})'); return s.scale > before.scale + .2 && s; }, 'Chromium synthesized pinch changes visual scale', 6000);
-  assert.equal((await nativeStatus(tab)).zoomFactor, layout, 'Pinch must not apply a second layout/page zoom');
-  assert.equal(after.width, before.width, 'Native visual pinch must preserve CSS layout width');
-  assert.ok(after.scale < 2.1, 'Pinch must not be double-applied');
-  const status = await nativeStatus(tab); await burst(tab, '#edge', -60, 0, 6); await assertStayed(tab, status, 'A zoomed page must pan instead of navigating history');
-  await cdp(tab, 'Emulation.setPageScaleFactor', { pageScaleFactor: 1 }); // Cleanup only, never evidence for pinch support.
-  return { before, after, layoutZoomFactor: layout, route: 'Chromium synthesized touch pinch; physical Mac trackpad unverified' };
+  assert.equal((await nativeStatus(tab)).zoomFactor, layout, 'Pinch must not change layout/page zoom');
+  return { before, samples, layoutZoomFactor: layout, route: 'Real Chromium synthesized pinch requests; no scale emulation/setter used' };
 }
+
 async function main() {
   server = http.createServer((req, res) => { res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.setHeader('Cache-Control', 'no-store'); res.end(fixtureHTML(new URL(req.url, 'http://fixture'))); });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); origin = 'http://127.0.0.1:' + server.address().port;
@@ -235,7 +233,15 @@ async function main() {
     const after = await nativeStatus(tab); assert.equal(after.index, before.index - 1); assert.equal((await state()).tabs.find(t => t.id === tab.id).private, true);
     assert.equal((await nativeStatus(normal)).url, origin + '/regular/c', 'Private gestures must affect only the selected private tab'); return { before, after, eventTail: await trustedWheels(tab, 1) };
   });
-  await check('Chromium pinch changes visual scale once while layout zoom stays isolated', async () => pinch(normal));
+  await check('Pinch magnification stays disabled on normal pages, private pages and the home shell', async () => {
+    await prepare(normal); const normalPage = await pinchDisabled(normal, await point(normal, '#edge'));
+    const privateTab = await create('pinch-private', true), privatePage = await pinchDisabled(privateTab, await point(privateTab, '#edge'));
+    const home = await invoke('tab:new'); await shell.locator('.orb-image').waitFor({ state: 'visible' });
+    const chrome = { id: home.id, wc: await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(w => w.webContents.getURL().startsWith('aster-ui://')).webContents.id) };
+    ownedContents.add(chrome.wc); await focus(chrome);
+    const center = await shell.locator('.generated-orb').evaluate(n => { const r=n.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}; });
+    return { normalPage, privatePage, home: await pinchDisabled(chrome, center) };
+  });
   assert.equal(errors.length, 0, 'Browser shell page errors: ' + errors.join('; '));
 }
 main().catch(error => { errors.push(error.stack || error.message); console.error(error.stack || error.message); }).finally(async () => {

@@ -56,9 +56,9 @@ test('main integration validates active sender, main frame, URL and overlay perm
   f.active(alien); for (let i = 0; i < 4; i++) f.send(); f.active(f.wc);
   assert.equal(f.wc.back, 0); for (let i = 0; i < 4; i++) f.send(); assert.equal(f.wc.back, 1);
 });
-test('pinch is native visual zoom and is never manually applied a second time', t => {
+test('pinch magnification is disabled in pages and shell without becoming history input', t => {
   const f = integrationFixture(); t.after(() => f.service.dispose());
-  assert.deepEqual(f.wc.zoom, [[1, 5]]); assert.equal(f.wc.zoomMode, 'isolated');
+  assert.deepEqual(f.wc.zoom, [[1, 1]]); assert.equal(f.wc.zoomMode, 'isolated');
   f.service.attachWebContents(f.wc); assert.equal(f.wc.zoom.length, 1);
   f.wc.emit('dom-ready'); assert.equal(f.wc.zoom.length, 2);
   f.wc.emit('input-event', {}, { type: 'gesturePinchBegin' });
@@ -66,6 +66,9 @@ test('pinch is native visual zoom and is never manually applied a second time', 
   for (let i = 0; i < 6; i++) f.send(); assert.equal(f.wc.back, 0);
   f.wc.emit('input-event', {}, { type: 'gesturePinchEnd' });
   for (let i = 0; i < 6; i++) f.send(); assert.equal(f.wc.back, 0); assert.equal(f.wc.zoom.length, 2);
+  const shell = new Contents('aster-ui://shell/index.html');
+  f.service.attachWebContents(shell, { shell: true }); shell.emit('dom-ready');
+  assert.deepEqual(shell.zoom, [[1, 1], [1, 1]]); assert.equal(shell.zoomMode, undefined);
 });
 test('legacy swipe and wheel fallback share a duplicate-navigation latch and dispose cleanly', t => {
   const f = integrationFixture(); t.after(() => f.service.dispose());
@@ -105,7 +108,7 @@ test('explicit browser-shell ownership enables home history without zooming brow
   assert.equal(ipcMain.handlers.get(CHANNELS.ready)(event, wc.url).canGoForward, true);
   assert.equal(ipcMain.handlers.get(CHANNELS.ready)(event, 'aster-ui://shell/other.html').enabled, false);
   for (let i = 0; i < 8; i++) { time += 16; ipcMain.emit(CHANNELS.wheel, event, { url: wc.url, contextId: 'home-tab', deltaX: 55, deltaY: 0, deltaMode: 0 }); }
-  assert.deepEqual(travelled, ['forward']); assert.deepEqual(wc.zoom, []); assert.equal(wc.zoomMode, undefined);
+  assert.deepEqual(travelled, ['forward']); assert.deepEqual(wc.zoom, [[1, 1]]); assert.equal(wc.zoomMode, undefined);
   service.dispose();
   const unowned = createNavigationGestures({ ipcMain: new IPC(), currentWebContents: () => wc, platform: 'darwin' });
   t.after(() => unowned.dispose()); unowned.attachWebContents(wc);
