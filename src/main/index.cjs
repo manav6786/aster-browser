@@ -465,8 +465,24 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle('aster:command', (event, name, p) => { if (event.sender !== win.webContents || event.senderFrame !== win.webContents.mainFrame || !event.senderFrame.url.startsWith('aster-ui://shell/')) throw new Error('Untrusted command sender'); return command(name, p); });
   wireShortcuts(win.webContents);
-  automation = await startAutomation({ directory: app.getPath('userData'), command: agentCommand, connect: agent => { state.agents.push(agent); publish(false); }, disconnect: id => { state.agents = state.agents.filter(a => a.id !== id); leases.releaseAgent(id); publish(false); } });
-  state.automation = { endpoint: automation.endpoint, tokenPath: automation.tokenPath, mcpPath: path.join(automationRoot, 'aster-mcp.cjs'), cliPath: path.join(automationRoot, 'aster.cjs') };
+  if (process.env.ASTER_AUTOMATION === '1') {
+    automation = await startAutomation({
+      directory: app.getPath('userData'),
+      command: agentCommand,
+      connect: client => { state.agents.push(client); publish(false); },
+      disconnect: id => {
+        state.agents = state.agents.filter(client => client.id !== id);
+        leases.releaseAgent(id);
+        publish(false);
+      },
+    });
+    state.automation = {
+      endpoint: automation.endpoint,
+      tokenPath: automation.tokenPath,
+      mcpPath: path.join(automationRoot, 'aster-mcp.cjs'),
+      cliPath: path.join(automationRoot, 'aster.cjs'),
+    };
+  }
   win.on('resize', layout); win.on('enter-full-screen', layout); win.on('leave-full-screen', layout);
   const publishWindowVisibility=()=>ui({command:'window-visibility',visible:win.isVisible()&&!win.isMinimized()});
   for(const event of ['show','hide','minimize','restore'])win.on(event,publishWindowVisibility);
@@ -477,7 +493,7 @@ app.whenReady().then(async () => {
   win.once('ready-to-show', () => { if(state.window?.maximized)win.maximize();win.show(); activate(state.activeTabId); });
   buildMenu(); await win.loadURL('aster-ui://shell/index.html');
   if (process.env.ASTER_DISABLE_FILTER_UPDATES !== '1' && (!state.shields.lastUpdated || Date.now() - Date.parse(state.shields.lastUpdated) > 86400000)) shields.refresh().catch(error => console.error('Filter update deferred:', error.message));
-  console.log('Aster ready. Local agent endpoint: ' + automation.endpoint);
+  console.log(automation ? 'Aster ready. Local automation: ' + automation.endpoint : 'Aster ready. Local automation is off.');
 }).catch(error => { console.error(error); app.quit(); });
 app.on('window-all-closed', () => app.quit());
 app.on('before-quit', event => {

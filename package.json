@@ -16,6 +16,7 @@
   "scripts": {
     "setup": "node node_modules/electron/install.js",
     "start": "electron .",
+    "start:automation": "ASTER_AUTOMATION=1 electron .",
     "test": "node --test test/*.test.cjs",
     "test:integration": "node scripts/integration.cjs",
     "test:backend": "node scripts/backend-regression.cjs",
