@@ -16,7 +16,7 @@ function createClient(name, transport) {
   async function request(route, body, method = 'POST') {
     if (!config) refreshConfig();
     const response = await fetch(config.endpoint + route, { method, headers: { Authorization: 'Bearer ' + config.token, 'Content-Type': 'application/json', ...(agentId ? { 'X-Aster-Agent': agentId } : {}) }, ...(method === 'POST' ? { body: JSON.stringify(body || {}) } : {}), signal: AbortSignal.timeout(60000) });
-    const result = await response.json(); if (!response.ok) { const error = new Error(result.error || 'Aster request failed'); error.status = response.status; throw error; } return result;
+    const result = await response.json(); if (!response.ok) { const error = new Error(result.error || 'Aster request failed'); error.status = response.status; if (result.details) error.details = result.details; throw error; } return result;
   }
   return {
     async connect() { refreshConfig(); if (agentId) return agentId; if (!connecting) connecting = (async () => { const result = await request('/connect', { name, transport }); agentId = result.agentId; clearInterval(heartbeat); heartbeat = setInterval(() => request('/heartbeat').catch(() => { agentId = null; clearInterval(heartbeat); }), 20000); heartbeat.unref(); return agentId; })(); try { return await connecting; } finally { connecting = null; } },

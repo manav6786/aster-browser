@@ -1,7 +1,7 @@
 {
   "name": "aster-browser",
   "productName": "Aster",
-  "version": "0.2.0",
+  "version": "0.4.0",
   "description": "A glassy personal browser with shared native agent control.",
   "main": "src/main/index.cjs",
   "private": true,
@@ -25,7 +25,17 @@
     "build:filters": "node scripts/build-filters.cjs",
     "build": "electron-builder --mac dir --arm64",
     "mcp": "node bin/aster-mcp.cjs",
-    "cli": "node bin/aster.cjs"
+    "cli": "node bin/aster.cjs",
+    "test:agents": "node scripts/agent-regression.cjs",
+    "test:search-motion": "node scripts/search-motion-regression.cjs",
+    "test:gestures": "node scripts/gestures-regression.cjs",
+    "build:glass": "node scripts/build-glass.cjs",
+    "test:session": "node scripts/session-regression.cjs",
+    "test:media-controls": "node scripts/media-controls-regression.cjs",
+    "test:performance": "node scripts/agent-benchmark.cjs",
+    "build:media-preload": "node scripts/build-media-preload.cjs",
+    "test:polish": "node scripts/ui-polish-regression.cjs",
+    "test:appearance": "node scripts/appearance-regression.cjs"
   },
   "dependencies": {
     "@ghostery/adblocker-electron": "2.20.1",
@@ -65,6 +75,14 @@
         "filter": [
           "**/*"
         ]
+      },
+      {
+        "from": "LICENSE",
+        "to": "licenses/Aster-MIT.txt"
+      },
+      {
+        "from": "THIRD_PARTY_NOTICES.md",
+        "to": "licenses/Aster-THIRD_PARTY_NOTICES.md"
       }
     ],
     "mac": {
@@ -77,6 +95,9 @@
         "NSMicrophoneUsageDescription": "A website can use the microphone only after you allow it.",
         "NSHighResolutionCapable": true
       }
-    }
+    },
+    "asarUnpack": [
+      "src/native/*.node"
+    ]
   }
 }

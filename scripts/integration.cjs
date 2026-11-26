@@ -65,7 +65,7 @@ async function main() {
   await window.evaluate(() => window.aster.invoke('tab:navigate', { url: 'aster://newtab' }));
   for (let i = 0; i < 10; i++) await run('tabs.create', { url: origin + '/second', active: false });
   await window.evaluate(() => window.aster.invoke('ui:mission', { open: true }));
-  await until(async () => await window.evaluate(() => document.body.innerText.includes('Mission Control')), 'mission view');
+  await window.getByRole('dialog', { name: 'Mission Control', exact: true }).waitFor({ state: 'visible' });
   await window.screenshot({ path: path.join(work, 'mission-control.png') });
   results.push('Mission Control opens with real previews and more tabs than one page');
   await window.evaluate(() => window.aster.invoke('ui:mission', { open: false }));
@@ -83,15 +83,16 @@ async function main() {
   assert.equal((await run('tabs.list', {})).find(t => t.id === tab.id).url, 'aster://settings');
   await window.evaluate(() => window.aster.invoke('shields:toggle'));
   results.push('Navigating from a website to internal settings closes the old remote page');
-  const mcp = spawn(process.execPath, [path.join(root, 'bin/aster-mcp.cjs')], { env: { ...process.env, ASTER_CONNECTION: path.join(profile, 'automation.json') }, stdio: ['pipe', 'pipe', 'pipe'] });
+  const mcpPath = process.env.ASTER_EXECUTABLE ? path.resolve(path.dirname(process.env.ASTER_EXECUTABLE), '../Resources/automation/aster-mcp.cjs') : path.join(root, 'bin/aster-mcp.cjs');
+  const mcp = spawn(process.execPath, [mcpPath], { env: { ...process.env, ASTER_CONNECTION: path.join(profile, 'automation.json') }, stdio: ['pipe', 'pipe', 'pipe'] });
   let mcpOutput = ''; mcp.stdout.on('data', d => { mcpOutput += d; });
   mcp.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'integration', version: '1' } } }) + '\n');
   mcp.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }) + '\n');
   mcp.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'browser_tabs', arguments: {} } }) + '\n');
   await until(() => mcpOutput.includes('"id":3'), 'MCP roundtrip');
-  const replies = mcpOutput.trim().split('\n').map(JSON.parse); assert.equal(replies.find(r => r.id === 2).result.tools.length, 21); assert.ok(replies.find(r => r.id === 3).result.content[0].text.includes(tab.id));
+  const replies = mcpOutput.trim().split('\n').map(JSON.parse); const discovered = replies.find(r => r.id === 2).result.tools; assert.equal(discovered.length, 31); for (const name of ['browser_capabilities','browser_inspect','browser_frames','browser_wait','browser_batch','browser_select','browser_check','browser_media','browser_volume','browser_picture_in_picture']) assert.ok(discovered.some(tool => tool.name === name)); assert.ok(replies.find(r => r.id === 3).result.content[0].text.includes(tab.id));
   mcp.stdin.end(); await new Promise(resolve => mcp.once('exit', resolve));
-  results.push('MCP stdio initialize, 21 tool discovery, and live browser tool call');
+  results.push('MCP stdio initialize, 31 tool discovery, and live browser tool call');
   assert.deepEqual(errors, []);
   results.push('Renderer ran without uncaught page errors');
   console.log(results.map(r => 'PASS ' + r).join('\n'));
