@@ -19,7 +19,7 @@ function parseStatus(output) {
   const text = plainText(output);
   const lines = text.split('\n');
   for (let i = lines.length - 1; i >= 0; i--) {
-    const match = /^(?:Status(?: update)?:\s*)?(Connected|Disconnected|Connecting|Disconnecting|Unable to connect)(?:\s*\([^\n]*\))?\s*$/i.exec(lines[i].trim());
+    const match = /^(?:Status(?: update)?:\s*)?(Connected|Disconnected|Connecting|Disconnecting|Unable(?: to connect)?)(?:\s*\([^\n]*\))?\s*$/i.exec(lines[i].trim());
     if (match) return { status: match[1].toLowerCase().replace(/\s+/g, '-'), detail: text.slice(0, 1000) };
   }
   return { status: 'unknown', detail: text.slice(0, 1000) };
@@ -136,7 +136,13 @@ function createVpnController({ onState } = {}, dependencies = {}) {
       }
       if (parsed.status === 'disconnected') return { ...base, status: 'disconnected', connected: false, message: 'Cloudflare WARP is disconnected.' };
       if (parsed.status === 'connecting' || parsed.status === 'disconnecting') return { ...base, status: parsed.status, connected: null, message: parsed.status === 'connecting' ? 'Cloudflare WARP is establishing its tunnel.' : 'Cloudflare WARP is disconnecting.' };
-      if (parsed.status === 'unable-to-connect') return { ...base, status: 'error', connected: false, error: { code: 'connection-failed', message: parsed.detail.slice(0, 500) }, message: 'Cloudflare WARP reports that it cannot connect. Check its app for the reason.' };
+      if (parsed.status === 'unable' || parsed.status === 'unable-to-connect') {
+        // Current WARP exits successfully for first-run registration failures;
+        // their setup reason must be handled even without a subprocess error.
+        const detail = errorDetails({ output: parsed.detail });
+        if (detail.status === 'setup-required') return { ...base, status: detail.status, connected: false, error: { code: detail.code, message: detail.message }, message: detail.message };
+        return { ...base, status: 'error', connected: false, error: { code: 'connection-failed', message: parsed.detail.slice(0, 500) }, message: 'Cloudflare WARP reports that it cannot connect. Check its app for the reason.' };
+      }
       return { ...base, status: 'unknown', connected: null, message: 'Cloudflare WARP returned an unrecognized status. Check the WARP app.' };
     } catch (error) {
       if (['unavailable', 'untrusted'].includes(error.code)) return getState();
