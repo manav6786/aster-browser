@@ -7,7 +7,8 @@ function fixture(t){const f=mainFixture({tabs:[{id:'first',url:'https://fixture.
 test('native page canvas and square corners do not expose a white rounded gutter in dark mode',async t=>{
  const f=fixture(t);await f.command('tab:activate',{id:'first'});const v=f.views.get('first');
  assert.equal(v.backgroundColor,'#000000');assert.equal(v.borderRadius,0);
- assert.deepEqual({...v.getBounds()},{x:246,y:86,width:1194,height:854});
+ const toolbarHeight = process.platform === 'darwin' ? 86 : 60;
+ assert.deepEqual({...v.getBounds()},{x:246,y:toolbarHeight,width:1194,height:940-toolbarHeight});
 });
 
 test('existing native canvases follow explicit and system theme changes without changing page bounds',async t=>{

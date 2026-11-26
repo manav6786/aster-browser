@@ -11,7 +11,9 @@ test('local API requires token, rejects browser origins, and isolates live conne
   const connected = new Set(); const prior = process.env.ASTER_PORT; process.env.ASTER_PORT = '0';
   const api = await startAutomation({ directory, command: (action, params, agent) => ({ action, params, agentId: agent.id }), connect: agent => connected.add(agent.id), disconnect: id => connected.delete(id) });
   try {
-    const config = JSON.parse(fs.readFileSync(api.tokenPath)); assert.equal(fs.statSync(api.tokenPath).mode & 0o777, 0o600);
+    const config = JSON.parse(fs.readFileSync(api.tokenPath));
+    // Windows file access is controlled by ACLs, so stat mode has POSIX meaning only on Unix.
+    if (process.platform !== 'win32') assert.equal(fs.statSync(api.tokenPath).mode & 0o777, 0o600);
     assert.equal((await fetch(api.endpoint + '/health')).status, 401);
     const headers = { Authorization: 'Bearer ' + config.token, 'Content-Type': 'application/json' };
     assert.equal((await fetch(api.endpoint + '/health', { headers: { ...headers, Origin: 'https://evil.example' } })).status, 401);
