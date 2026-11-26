@@ -26,6 +26,9 @@ protocol.registerSchemesAsPrivileged([
 ]);
 if (process.env.ASTER_DATA_DIR) app.setPath('userData', path.resolve(process.env.ASTER_DATA_DIR));
 app.setName('Aster');
+const macOS = process.platform === 'darwin';
+const toolbarHeight = macOS ? 86 : 60;
+if (process.platform === 'win32') app.setAppUserModelId('dev.aster.browser');
 if (!app.requestSingleInstanceLock()) { app.quit(); process.exit(0); }
 app.on('second-instance', () => { if (win && !win.isDestroyed()) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } });
 const root = path.join(__dirname, '../..');
@@ -109,7 +112,7 @@ function layout(duration = 0) {
   const x = state.settings.sidebarCollapsed ? 76 : 246;
   if(nativeGlass){
     const enabled=state.settings.transparency&&!nativeTheme.prefersReducedTransparency;
-    state.nativeGlass={...nativeGlass.update({enabled,dark:nativeTheme.shouldUseDarkColors,accent:accentColors[state.settings.accent]||accentColors.purple,contentBounds:fullscreenTabId?{x:0,y:0,width,height}:{x,y:86,width:Math.max(0,width-x),height:Math.max(0,height-86)},cornerRadius:0}),reducedTransparency:Boolean(nativeTheme.prefersReducedTransparency)};
+    state.nativeGlass={...nativeGlass.update({enabled,dark:nativeTheme.shouldUseDarkColors,accent:accentColors[state.settings.accent]||accentColors.purple,contentBounds:fullscreenTabId?{x:0,y:0,width,height}:{x,y:toolbarHeight,width:Math.max(0,width-x),height:Math.max(0,height-toolbarHeight)},cornerRadius:0}),reducedTransparency:Boolean(nativeTheme.prefersReducedTransparency)};
     // Electron45 removes only its owned NSVisualEffectView here; the source
     // content NSView and our behind-chrome glass host remain attached.
     const fallback=enabled&&!nativeGlass.available?'sidebar':null;
@@ -119,7 +122,7 @@ function layout(duration = 0) {
   for (const [id, view] of views) {
     updateViewCanvas(view);
     const visible = id === state.activeTabId && !overlay && !state.missionOpen && isRemote(current()) && !current()?.error;
-    const target=id === fullscreenTabId && visible ? { x: 0, y: 0, width, height } : { x, y: 86, width: Math.max(50, width - x), height: Math.max(50, height - 86) };
+    const target=id === fullscreenTabId && visible ? { x: 0, y: 0, width, height } : { x, y: toolbarHeight, width: Math.max(50, width - x), height: Math.max(50, height - toolbarHeight) };
     if(duration&&visible&&!fullscreenTabId)motions.push({view,from:view.getBounds(),target});else view.setBounds(target);
     view.setVisible(visible);
   }
@@ -198,7 +201,7 @@ function ensureView(tab, popupOptions = null) {
   if (view.setBorderRadius) view.setBorderRadius(0);
   const [initialWidth, initialHeight] = win.getContentSize();
   const initialX = state.settings.sidebarCollapsed ? 76 : 246;
-  view.setBounds({ x: initialX, y: 86, width: initialWidth - initialX, height: initialHeight - 86 });
+  view.setBounds({ x: initialX, y: toolbarHeight, width: initialWidth - initialX, height: initialHeight - toolbarHeight });
   views.set(tab.id, view); wcTabs.set(view.webContents.id, tab.id); win.contentView.addChildView(view);
   const wc = view.webContents;
   navigationGestures?.attachWebContents(wc);
@@ -415,7 +418,13 @@ async function agentCommand(action, p, agent) {
 function buildMenu() {
   const openInternal = route => createTab({ url: 'aster://' + route });
   Menu.setApplicationMenu(Menu.buildFromTemplate([
-    { label: 'Aster', submenu: [{ role: 'about' }, { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: () => openInternal('settings') }, { type: 'separator' }, { role: 'services' }, { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit' }] },
+    { label: 'Aster', submenu: [
+      { role: 'about' },
+      { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: () => openInternal('settings') },
+      ...(macOS ? [{ type: 'separator' }, { role: 'services' }, { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }] : []),
+      { type: 'separator' },
+      { role: 'quit' },
+    ] },
     { label: 'File', submenu: [{ label: 'New Tab', accelerator: 'CmdOrCtrl+T', click: () => createTab() }, { label: 'New Private Tab', accelerator: 'CmdOrCtrl+Shift+N', click: () => createTab({ private: true }) }, { label: 'Reopen Closed Tab', accelerator: 'CmdOrCtrl+Shift+T', click: () => command('tab:restore') }, { label: 'Close Tab', accelerator: 'CmdOrCtrl+W', click: () => closeTab() }, { type: 'separator' }, { label: 'Print…', accelerator: 'CmdOrCtrl+P', click: () => views.get(state.activeTabId)?.webContents.print() }] },
     { label: 'Edit', submenu: [{ role: 'undo' }, { role: 'redo' }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }, { label: 'Find…', accelerator: 'CmdOrCtrl+F', click: () => { win.webContents.focus(); ui('find'); } }] },
     { label: 'View', submenu: [{ label: 'Mission Control', accelerator: 'CmdOrCtrl+Shift+M', click: () => mission(!state.missionOpen) }, { label: 'Command Palette', accelerator: 'CmdOrCtrl+K', click: () => { overlay = true; layout(); ui('palette'); } }, { label: 'Toggle Sidebar', accelerator: 'CmdOrCtrl+Shift+S', click: () => command('settings:update', { sidebarCollapsed: !state.settings.sidebarCollapsed }) }, { type: 'separator' }, { role: 'togglefullscreen' }, { label: 'Actual Size', accelerator: 'CmdOrCtrl+0', click: () => command('page:zoom', { reset: true }) }, { label: 'Zoom In', accelerator: 'CmdOrCtrl+Plus', click: () => command('page:zoom', { delta: 0.1 }) }, { label: 'Zoom Out', accelerator: 'CmdOrCtrl+-', click: () => command('page:zoom', { delta: -0.1 }) }, { label: 'Page Developer Tools', accelerator: 'Alt+CmdOrCtrl+I', click: () => views.get(state.activeTabId)?.webContents.openDevTools({ mode: 'detach' }) }] },
@@ -448,9 +457,18 @@ app.whenReady().then(async () => {
   setupSession(session.fromPartition('persist:aster'));
   let windowBounds={width:1440,height:940};const oldBounds=state.window?.bounds;
   if(oldBounds&&['x','y','width','height'].every(k=>Number.isFinite(oldBounds[k]))){const area=screen.getDisplayMatching(oldBounds).workArea;const width=Math.max(1050,Math.min(oldBounds.width,area.width)),height=Math.max(700,Math.min(oldBounds.height,area.height));windowBounds={width:Math.round(width),height:Math.round(height),x:Math.round(Math.max(area.x,Math.min(oldBounds.x,area.x+area.width-width))),y:Math.round(Math.max(area.y,Math.min(oldBounds.y,area.y+area.height-height)))};}
-  win = new BrowserWindow({ ...windowBounds, minWidth: 1050, minHeight: 700, title: 'Aster', titleBarStyle: 'hidden', trafficLightPosition: { x: 20, y: 20 }, vibrancy: 'sidebar', visualEffectState: 'active', backgroundColor: '#00000000', show: false, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true } });
-  nativeGlass=createNativeGlass({win});state.nativeGlass=nativeGlass.status;
-  vpnStatusWatch=watchVpnStatus(win,{refresh:()=>vpn.refresh()});
+  const windowChrome = macOS
+    ? { titleBarStyle: 'hidden', trafficLightPosition: { x: 20, y: 20 }, vibrancy: 'sidebar', visualEffectState: 'active', backgroundColor: '#00000000' }
+    : { autoHideMenuBar: true, backgroundColor: pageCanvasColor(), icon: path.join(root, 'assets/icon.png') };
+  win = new BrowserWindow({
+    ...windowBounds, ...windowChrome, minWidth: 1050, minHeight: 700, title: 'Aster', show: false,
+    webPreferences: { preload: path.join(__dirname, 'preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true },
+  });
+  if (macOS) {
+    nativeGlass = createNativeGlass({ win });
+    state.nativeGlass = nativeGlass.status;
+    vpnStatusWatch = watchVpnStatus(win, { refresh: () => vpn.refresh() });
+  }
   nativeTheme.on('updated',()=>{layout();publish(false);});
   navigationGestures.attachWindow(win);navigationGestures.attachWebContents(win.webContents,{shell:true});
   agentEngine=createAgentEngine({ensureView,isHtmlFullscreen:wc=>wcTabs.get(wc.id)===fullscreenTabId,captureFocus:()=>({contents:webContents.getFocusedWebContents(),activeId:state.activeTabId,focused:win.isFocused()}),restoreFocus:(saved,target)=>{if(saved?.focused&&win.isFocused()&&saved.activeId===state.activeTabId&&saved.contents&&!saved.contents.isDestroyed()&&target!==saved.contents)saved.contents.focus();}});

@@ -18,7 +18,7 @@ async function startAutomation({ directory, command, connect, disconnect, onEven
     if (!authorize(req)) return send(res, 401, { error: 'A local Aster token is required. Browser-origin requests are disabled.' });
     try {
       const route = new URL(req.url, 'http://127.0.0.1').pathname;
-      if (req.method === 'GET' && route === '/health') return send(res, 200, { name: 'Aster', version: '0.4.4', protocol: 1 });
+      if (req.method === 'GET' && route === '/health') return send(res, 200, { name: 'Aster', version: '0.5.0', protocol: 1 });
       if (req.method === 'POST') {
         let body = ''; for await (const chunk of req) { body += chunk; if (body.length > 1048576) { send(res, 413, { error: 'Request exceeds 1 MiB' }); req.destroy(); return; } }
         const input = JSON.parse(body || '{}');
