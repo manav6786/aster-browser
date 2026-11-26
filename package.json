@@ -1,12 +1,12 @@
 {
   "name": "aster-browser",
   "productName": "Aster",
-  "version": "0.4.3",
-  "description": "A glassy personal browser with shared native agent control.",
+  "version": "0.4.4",
+  "description": "A Chromium browser with workspaces, Mission Control, and native media controls.",
   "main": "src/main/index.cjs",
   "private": true,
   "license": "MIT",
-  "author": "Personal project",
+  "author": "Manav Harsora",
   "allowScripts": {
     "electron": true,
     "esbuild": true,
@@ -48,7 +48,7 @@
     "tldts-experimental": "7.4.19"
   },
   "devDependencies": {
-    "electron": "45.0.0",
+    "electron": "45.5.0",
     "electron-builder": "26.15.3",
     "playwright": "1.64.1",
     "pngjs": "7.0.0"
