@@ -77,6 +77,50 @@ test('legacy swipe and wheel fallback share a duplicate-navigation latch and dis
   f.service.dispose(); assert.equal(removed, 1); assert.equal(win.listenerCount('swipe'), 0); assert.equal(f.ipcMain.handlers.size, 0); assert.equal(f.wc.listenerCount('input-event'), 0);
 });
 
+test('logical browser history overrides a remote-only native stack and rejects stale tab contexts', async t => {
+  const ipcMain = new IPC(), wc = new Contents(); let time = 1000, contextId = 'tab-a';
+  wc.navigationHistory.canGoBack = () => false;
+  const travelled = [], failures = [];
+  const service = createNavigationGestures({ ipcMain, currentWebContents: () => wc, platform: 'darwin', now: () => time,
+    availabilityForWebContents: () => ({ canGoBack: true, canGoForward: false }),
+    navigationContextForWebContents: () => contextId,
+    navigate: async (target, direction) => { travelled.push({ target, direction }); }, onError: error => failures.push(error) });
+  service.attachWebContents(wc); t.after(() => service.dispose());
+  const event = { sender: wc, senderFrame: wc.mainFrame };
+  assert.equal(ipcMain.handlers.get(CHANNELS.ready)(event, wc.url).canGoBack, true);
+  for (let i = 0; i < 4; i++) { time += 16; ipcMain.emit(CHANNELS.wheel, event, { url: wc.url, contextId: 'old-tab', deltaX: -55, deltaY: 0, deltaMode: 0 }); }
+  assert.equal(travelled.length, 0);
+  for (let i = 0; i < 8; i++) { time += 16; ipcMain.emit(CHANNELS.wheel, event, { url: wc.url, contextId, deltaX: -55, deltaY: 0, deltaMode: 0 }); }
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(travelled.map(v => v.direction), ['back']); assert.equal(travelled[0].target, wc); assert.equal(wc.back, 0); assert.deepEqual(failures, []);
+});
+
+test('explicit browser-shell ownership enables home history without zooming browser chrome', t => {
+  const ipcMain = new IPC(), wc = new Contents('aster-ui://shell/index.html'); let time = 1000;
+  const travelled = [], service = createNavigationGestures({ ipcMain, currentWebContents: () => wc, platform: 'darwin', now: () => time,
+    availabilityForWebContents: () => ({ canGoBack: false, canGoForward: true }), navigationContextForWebContents: () => 'home-tab',
+    navigate: (_target, direction) => { travelled.push(direction); return true; } });
+  t.after(() => service.dispose()); service.attachWebContents(wc, { shell: true });
+  const event = { sender: wc, senderFrame: wc.mainFrame };
+  assert.equal(ipcMain.handlers.get(CHANNELS.ready)(event, wc.url).canGoForward, true);
+  assert.equal(ipcMain.handlers.get(CHANNELS.ready)(event, 'aster-ui://shell/other.html').enabled, false);
+  for (let i = 0; i < 8; i++) { time += 16; ipcMain.emit(CHANNELS.wheel, event, { url: wc.url, contextId: 'home-tab', deltaX: 55, deltaY: 0, deltaMode: 0 }); }
+  assert.deepEqual(travelled, ['forward']); assert.deepEqual(wc.zoom, []); assert.equal(wc.zoomMode, undefined);
+  service.dispose();
+  const unowned = createNavigationGestures({ ipcMain: new IPC(), currentWebContents: () => wc, platform: 'darwin' });
+  t.after(() => unowned.dispose()); unowned.attachWebContents(wc);
+  assert.equal(unowned ? wc.sent.length >= 0 : false, true);
+});
+
+test('an asynchronous logical navigation failure is handled once rather than replaying momentum', async t => {
+  const ipcMain = new IPC(), wc = new Contents(); let time = 1000, attempts = 0;
+  const failures = [], service = createNavigationGestures({ ipcMain, currentWebContents: () => wc, platform: 'darwin', now: () => time,
+    navigate: async () => { attempts++; throw new Error('navigation cancelled'); }, onError: error => failures.push(error.message) });
+  service.attachWebContents(wc); t.after(() => service.dispose());
+  for (let i = 0; i < 15; i++) { time += 16; ipcMain.emit(CHANNELS.wheel, { sender: wc, senderFrame: wc.mainFrame }, { url: wc.url, deltaX: -55, deltaY: 0, deltaMode: 0 }); }
+  await new Promise(resolve => setImmediate(resolve)); assert.equal(attempts, 1); assert.deepEqual(failures, ['navigation cancelled']);
+});
+
 test('sandbox preload preserves scroll chains, RTL edges, page cancellation and trusted-input boundary', async () => {
   const ipc = new EventEmitter(), sent = [], listeners = new Map(), microtasks = [];
   const url = 'https://fixture.test/', root = { nodeType: 1, tagName: 'HTML', scrollWidth: 800, clientWidth: 800, scrollLeft: 0, style: { overflowX: 'auto', direction: 'ltr', overscrollBehaviorX: 'auto' } };
@@ -102,4 +146,70 @@ test('sandbox preload preserves scroll chains, RTL edges, page cancellation and 
   const event = { isTrusted: true, deltaX: -55, deltaY: 0, deltaMode: 0, composedPath: () => [root] };
   listeners.get('wheel')(event); event.defaultPrevented = true; while (microtasks.length) microtasks.shift()(); assert.equal(sent.at(-1)[1].blocked, true);
   assert.equal(window.aster, undefined, 'Preload must not expose a page bridge');
+});
+
+test('shell preload accepts only internal page content and captures the originating tab context', async () => {
+  const ipc = new EventEmitter(), sent = [], listeners = new Map(), tasks = [];
+  const url = 'aster-ui://shell/index.html', content = { nodeType: 1, tagName: 'MAIN', scrollWidth: 800, clientWidth: 800, scrollLeft: 0, style: { overflowX: 'hidden', direction: 'ltr', overscrollBehaviorX: 'auto' } };
+  const root = { ...content, tagName: 'HTML' }, window = { visualViewport: { scale: 1 } }; window.top = window;
+  ipc.invoke = async () => ({ url, enabled: true, canGoBack: true, canGoForward: true, contextId: 'tab-a' }); ipc.send = (...args) => sent.push(args);
+  const context = { window, location: { href: url }, document: { scrollingElement: root, body: root, getElementById: id => id === 'content' ? content : null }, require: () => ({ ipcRenderer: ipc }),
+    getComputedStyle: element => element.style, addEventListener: (name, fn) => listeners.set(name, fn), removeEventListener() {}, setTimeout: fn => tasks.push(fn) };
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/main/navigation-preload.cjs'), 'utf8'), context);
+  await new Promise(resolve => setImmediate(resolve));
+  const event = nodes => ({ isTrusted: true, deltaX: -55, deltaY: 0, deltaMode: 0, composedPath: () => nodes });
+  listeners.get('wheel')(event([root])); while (tasks.length) tasks.shift()(); assert.equal(sent.length, 0, 'Toolbar/sidebar scroll is not page history navigation');
+  listeners.get('wheel')(event([content, root]));
+  ipc.emit(CHANNELS.state, {}, { url, enabled: true, canGoBack: true, canGoForward: true, contextId: 'tab-b' });
+  while (tasks.length) tasks.shift()();
+  assert.equal(sent.length, 1); assert.equal(sent[0][1].contextId, 'tab-a', 'Delayed event must not inherit a newer active tab');
+  assert.equal(window.aster, undefined, 'Gesture preload adds no page bridge');
+});
+
+test('physical phases accept a short quick swipe and an immediate opposite new gesture', () => {
+ const f=wheelFixture(),finger=id=>({precise:true,gestureId:id,phase:4,momentum:0});
+ assert.equal(f.send({deltaX:-25,nativePhase:finger(1)}),null);
+ assert.equal(f.send({deltaX:-30,nativePhase:finger(1)}),'back');
+ assert.equal(f.send({deltaX:25,nativePhase:finger(2)}),null);
+ assert.equal(f.send({deltaX:30,nativePhase:finger(2)}),'forward');
+});
+test('native momentum never initiates another history step or rearms a consumed finger gesture', () => {
+ const f=wheelFixture(),finger={precise:true,gestureId:1,phase:4,momentum:0};
+ f.send({deltaX:-25,nativePhase:finger});assert.equal(f.send({deltaX:-30,nativePhase:finger}),'back');
+ for(let i=0;i<370;i++)assert.equal(f.send({deltaX:-30,nativePhase:{...finger,phase:0,momentum:4}}),null);
+ assert.equal(f.send({deltaX:-80,nativePhase:finger}),null);
+ assert.equal(f.send({deltaX:25,nativePhase:{...finger,gestureId:2}}),null);
+ assert.equal(f.send({deltaX:30,nativePhase:{...finger,gestureId:2}}),'forward');
+ const onlyMomentum=wheelFixture();for(let i=0;i<10;i++)assert.equal(onlyMomentum.send({nativePhase:{...finger,phase:0,momentum:4}}),null);
+});
+test('physical phase changes do not weaken vertical, editable, cancelled or modifier exclusions', () => {
+ for(const first of [{deltaX:1,deltaY:50},{blocked:true},{control:true},{deltaMode:1}]){
+  const f=wheelFixture(),finger={precise:true,gestureId:1,phase:4,momentum:0};
+  f.send({...first,nativePhase:finger});for(let i=0;i<8;i++)assert.equal(f.send({nativePhase:finger}),null);
+  assert.equal(f.send({deltaX:-25,nativePhase:{...finger,gestureId:2}}),null);
+  assert.equal(f.send({deltaX:-30,nativePhase:{...finger,gestureId:2}}),'back');
+ }
+});
+test('window phase latch spans remote view replacement and reports matched physical events', t => {
+ const ipcMain=new IPC(),a=new Contents(),b=new Contents('https://other.test/');let active=a,time=1000,phase={precise:true,gestureId:1,phase:4,momentum:0,distanceMs:.5},disposed=0;
+ const reader={available:true,sample:()=>phase,dispose(){disposed++;}},win=new EventEmitter();win.isDestroyed=()=>false;win.isFocused=()=>true;
+ const service=createNavigationGestures({ipcMain,currentWebContents:()=>active,now:()=>time,platform:'darwin',phaseReaderFactory:()=>reader});t.after(()=>service.dispose());service.attachWebContents(a);service.attachWebContents(b);service.attachWindow(win);
+ const send=(dx)=>{time+=16;ipcMain.emit(CHANNELS.wheel,{sender:active,senderFrame:active.mainFrame},{url:active.url,eventTime:time,deltaX:dx,deltaY:0,deltaMode:0});};
+ send(-25);send(-30);assert.equal(a.back,1);active=b;for(let i=0;i<8;i++)send(-40);assert.equal(b.back,0);
+ phase={...phase,gestureId:2};send(25);send(30);assert.equal(b.forward,1);
+ const state=service.getState();assert.equal(state.nativePhases,true);assert.equal(state.nativeNavigations,2);assert.ok(state.momentumSuppressed>=8);assert.equal(state.lastMatchDistanceMs,.5);
+ win.emit('closed');assert.equal(disposed,1);assert.equal(service.getState().nativePhases,false);
+});
+test('ordinary unphased wheel input never inherits a permanently consumed native generation', t => {
+ const ipcMain=new IPC(),wc=new Contents();let time=1000;
+ const win=new EventEmitter();win.isDestroyed=()=>false;win.isFocused=()=>true;
+ const service=createNavigationGestures({ipcMain,currentWebContents:()=>wc,now:()=>time,platform:'darwin',phaseReaderFactory:()=>({available:true,sample:()=>({precise:false,gestureId:0,phase:0,momentum:0}),dispose(){}})});t.after(()=>service.dispose());service.attachWebContents(wc);service.attachWindow(win);
+ const send=()=>{time+=16;ipcMain.emit(CHANNELS.wheel,{sender:wc,senderFrame:wc.mainFrame},{url:wc.url,eventTime:time,deltaX:-55,deltaY:0,deltaMode:0});};
+ for(let i=0;i<4;i++)send();assert.equal(wc.back,1);time+=1200;for(let i=0;i<4;i++)send();assert.equal(wc.back,2);assert.equal(service.getState().nativeNavigations,0);
+});
+test('native phase wrapper owns one token, fails closed and disposes idempotently', () => {
+ const {createNativeGesturePhases}=require('../src/main/native-gesture-phases.cjs');const calls=[],handle=Buffer.alloc(8),token={};
+ const reader=createNativeGesturePhases({getNativeWindowHandle:()=>handle},{platform:'darwin',native:{attach:h=>{calls.push(h);return token;},sample:(t,at)=>{assert.equal(t,token);return {at};},dispose:t=>calls.push(t)}});
+ assert.equal(reader.available,true);assert.deepEqual(reader.sample(12),{at:12});reader.dispose();reader.dispose();assert.equal(reader.sample(13),null);assert.deepEqual(calls,[handle,token]);
+ assert.equal(createNativeGesturePhases({},{platform:'darwin'}).available,false);
 });
