@@ -1,7 +1,7 @@
 {
   "name": "aster-browser",
   "productName": "Aster",
-  "version": "0.4.4",
+  "version": "0.5.0",
   "description": "A Chromium browser with workspaces, Mission Control, and native media controls.",
   "main": "src/main/index.cjs",
   "private": true,
@@ -16,7 +16,7 @@
   "scripts": {
     "setup": "node node_modules/electron/install.js",
     "start": "electron .",
-    "start:automation": "ASTER_AUTOMATION=1 electron .",
+    "start:automation": "node scripts/start-automation.cjs",
     "test": "node --test test/*.test.cjs",
     "test:integration": "node scripts/integration.cjs",
     "test:backend": "node scripts/backend-regression.cjs",
@@ -42,7 +42,9 @@
     "test:accessibility": "node scripts/renderer-accessibility-regression.cjs",
     "test:client-timeout": "node scripts/client-timeout-regression.cjs",
     "test:navigation": "node scripts/navigation-regression.cjs",
-    "build:gesture-phases": "node scripts/build-gesture-phases.cjs"
+    "build:gesture-phases": "node scripts/build-gesture-phases.cjs",
+    "dist:mac": "electron-builder --mac dmg --publish never",
+    "dist:win": "electron-builder --win nsis --x64 --publish never"
   },
   "dependencies": {
     "@ghostery/adblocker-electron": "2.20.1",
@@ -94,17 +96,39 @@
     ],
     "mac": {
       "category": "public.app-category.productivity",
-      "target": "dir",
-      "identity": null,
+      "target": "dmg",
+      "identity": "-",
       "icon": "assets/icon.icns",
       "extendInfo": {
         "NSCameraUsageDescription": "A website can use the camera only after you allow it.",
         "NSMicrophoneUsageDescription": "A website can use the microphone only after you allow it.",
         "NSHighResolutionCapable": true
-      }
+      },
+      "hardenedRuntime": false,
+      "notarize": false,
+      "minimumSystemVersion": "13.0"
     },
     "asarUnpack": [
       "src/native/*.node"
-    ]
+    ],
+    "dmg": {
+      "artifactName": "Aster-${version}-mac-${arch}.${ext}",
+      "writeUpdateInfo": false,
+      "title": "Aster ${version}"
+    },
+    "win": {
+      "icon": "assets/icon.png",
+      "target": "nsis",
+      "artifactName": "Aster-${version}-windows-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": false,
+      "createStartMenuShortcut": true,
+      "differentialPackage": false
+    }
   }
 }
