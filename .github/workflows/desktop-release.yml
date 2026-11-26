@@ -1,0 +1,142 @@
+name: Desktop release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Install and test (${{ matrix.platform }} / ${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: mac
+            arch: arm64
+            extension: dmg
+            runner: macos-26
+          - platform: mac
+            arch: x64
+            extension: dmg
+            runner: macos-26-intel
+          - platform: windows
+            arch: x64
+            extension: exe
+            runner: windows-2025
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run setup
+      - run: npm test
+      - run: npm run build:filters
+      - run: npm run build:media-preload
+      - name: Build and test the Mac disk image
+        if: matrix.platform == 'mac'
+        shell: bash
+        run: |
+          npm run build:glass -- --required
+          npm run build:gesture-phases -- --required
+          npm run dist:mac -- --${{ matrix.arch }}
+
+          version=$(node -p "require('./package.json').version")
+          image="dist/Aster-$version-mac-${{ matrix.arch }}.dmg"
+          hdiutil verify "$image"
+          scratch=$(mktemp -d "$RUNNER_TEMP/aster-install.XXXXXX")
+          mount="$scratch/image"
+          mkdir "$mount"
+          hdiutil attach "$image" -nobrowse -readonly -mountpoint "$mount"
+          trap 'hdiutil detach "$mount"' EXIT
+          ditto "$mount/Aster.app" "$scratch/Aster.app"
+          hdiutil detach "$mount"
+          trap - EXIT
+          codesign --verify --deep --strict "$scratch/Aster.app"
+          ASTER_EXECUTABLE="$scratch/Aster.app/Contents/MacOS/Aster" node scripts/release-smoke.cjs
+      - name: Build and test the Windows installer
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          npm run dist:win
+          if ($LASTEXITCODE -ne 0) { throw 'Windows packaging failed' }
+          $version = node -p "require('./package.json').version"
+          $installer = "dist/Aster-$version-windows-x64.exe"
+          $destination = Join-Path $env:RUNNER_TEMP "AsterPreviewInstall"
+          $process = Start-Process -FilePath $installer -ArgumentList @('/S', "/D=$destination") -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Installer exited with $($process.ExitCode)" }
+          $env:ASTER_EXECUTABLE = Join-Path $destination "Aster.exe"
+          if (!(Test-Path $env:ASTER_EXECUTABLE)) { throw "Aster.exe was not installed in $destination" }
+          node scripts/release-smoke.cjs
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: desktop-${{ matrix.platform }}-${{ matrix.arch }}
+          path: dist/Aster-*-${{ matrix.platform }}-${{ matrix.arch }}.${{ matrix.extension }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+
+  publish:
+    name: Publish the verified preview
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: desktop-*
+          merge-multiple: true
+          path: release
+      - name: Publish installers and checksums
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          tag="v$version"
+          cd release
+          installers=(
+            "Aster-$version-mac-arm64.dmg"
+            "Aster-$version-mac-x64.dmg"
+            "Aster-$version-windows-x64.exe"
+          )
+          for installer in "${installers[@]}"; do test -s "$installer"; done
+          sha256sum "${installers[@]}" > SHA256SUMS.txt
+
+          cat > "$RUNNER_TEMP/aster-release-notes.md" <<'NOTES'
+          Aster brings workspaces, Mission Control, tracking protection, and per-tab media controls to macOS and Windows.
+
+          | Platform | Download |
+          | --- | --- |
+          | Apple silicon Mac, macOS 13 or newer | **mac-arm64.dmg** |
+          | Intel Mac, macOS 13 or newer | **mac-x64.dmg** |
+          | Windows x64 | **windows-x64.exe** |
+
+          Choose the installer for your platform in **Assets** below. Use **SHA256SUMS.txt** to verify your download.
+
+          Each installer passed packaged checks for navigation, local video playback, Mission Control, and session restore on its native runner.
+
+          This desktop preview uses ad hoc signing on macOS and awaits Apple notarization. The Windows installer awaits publisher signing. Your system may flag the download.
+          NOTES
+
+          gh release create "$tag" "${installers[@]}" SHA256SUMS.txt \
+            --target "$GITHUB_SHA" \
+            --title "Aster $version desktop preview" \
+            --notes-file "$RUNNER_TEMP/aster-release-notes.md" \
+            --prerelease --draft
+          gh release edit "$tag" --draft=false
