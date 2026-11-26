@@ -1,0 +1,185 @@
+<html>
+
+<head>
+<meta name=author content="Peter Lowe; pgl@yoyo.org">
+<meta name=MSSmartTagsPreventParsing content="TRUE">
+<meta name=cabal content="">
+<meta charset="utf-8" /> 
+
+<meta rel="me" href="https://infosec.exchange/@pgl" />
+<meta rel="me" href="https://twitter.com/pgl" />
+<meta rel="me" href="https://github.com/pgl" />
+
+<meta http-equiv="content-type" content="text/html; charset=utf-8">
+
+<link rel="shortcut icon" href="https://pgl.yoyo.org/favicon.ico">
+<link rel="icon" href="https://pgl.yoyo.org/favicon.ico" type="image/ico">
+
+<script type="text/javascript" language="javascript"><!--
+if (window != top) top.location.href = location.href;
+// --></script>
+
+<meta name="description" value="A list of ad servers and how to use them to easily block 90% of ads on the web.">
+<meta name="keywords" value="trackers, tracking, ad blocking, blocking ads, ad servers, ads, banners, hosts file, privacy, blocking spyware, mac hosts">
+
+<title>
+Ad server hostnames: Ad server hostname inclusion policy
+</title>
+
+<link rel='stylesheet' href='/css/pgl.css' type='text/css'>
+<link rel=stylesheet type="text/css" href="../css/adservers.css">
+
+</head>
+
+<body marginheight=0 marginwidth=0 leftmargin=0 rightmargin=0 topmargin=0 bottommargin=0>
+
+<table width="100%" cellpadding=0 cellspacing=0>
+
+
+<tr><td class=small>
+	<table width=100% cellpadding=1 cellspacing=0 bgcolor="#CCC" style="border: 1px solid #444;">
+
+	<tr width="33%" bgcolor="#EEEEEE">
+	<td class=red style="font-size: 10px; padding-left: 4px;">
+	last updated: <b>Thu, 22 Oct 2026 12:00:57 GMT</b>
+	</td>
+
+	<td width="33%" class=red style="font-size: 10px; padding-left: 4px;" align=center>
+	last validated: <b>Fri, 16 Oct 2026 11:02:41</b>
+	</td>
+
+	<td width="33%" class=red style="font-size: 10px; padding-right: 4px;" align=right>
+	<b>3573</b> ad server hostnames; <b>7286</b> IP addresses
+	</td>
+	</tr>
+
+	</table>
+</td></tr>
+
+<tr><td align=center bgcolor="#000080" style="padding: 5px; border-bottom: 1px solid black;">
+	<table cellpadding=3 cellspacing=0 bgcolor="#BBBBBB" style="border: 1px solid #444444;">
+
+    <tr bgcolor="#EEEEEE">
+    <td colspan=3 align=center>
+    <b>PATREON: <a href="https://patreon.com/blocklist">patreon.com/blocklist</a></b>
+    </td>
+    </tr>
+
+	<tr bgcolor="#EEEEEE">
+	<td class=small>main:</td>
+	<td style="font-size: 10px; padding: 1px;" colspan=2>
+		[ <a class=red href="/as/#about">about the list</a>
+		| <a class=red href="/as/#how">how it works</a>
+		| <a class=red href="/as/#foursteps">four easy steps</a>
+		| <a class=red href="/as/#news">latest news</a>
+		| <a class=red href="/as/#submit">submit hostnames</a>
+		| <a class=red href="/as/#other">ways to use the list</a>
+		| <a class=red href="/as/details.php">lookup</a>
+		]
+	</td>
+	</tr>
+
+	<tr bgcolor="#EEEEEE">
+	<td class=small>tools:</td>
+	<td style="font-size: 10px; padding: 1px;" colspan=2>
+		[ <a class=red href="/as/hosts2bind.php">hosts file -> BIND converter</a>
+		| <a class=red href="/as/bind-zone-file-creator.php">BIND zone file creator</a>
+		| <a class=red href="/as/scripts/">miscellaneous scripts</a>
+		| <a class=red href="/as/software/">software archive</a>
+		| <a class=red href="/as/links.php">links</a>
+		]
+	</td>
+	</tr>
+
+	<tr bgcolor="#EEEEEE">
+	<td class=small>more:</td>
+	<td style="font-size: 10px; padding: 1px;">
+		[ <a class=red href="index.php">main page</a>		| <a class=red href="/as/news.php">site news</a>
+		| <a class=red href="/as/formats.php">list of formats</a>
+		| <a class=red href="/as/policy.php">policy</a>
+		| RSS: <a class=red href="/as/rss/adservers.rss">updates</a>, <a href="rss/news.rss">news</a>
+		| <a class=red href="/">other bits and pieces</a>
+		| <a class=red href="mailto:pgl@yoyo.org">email</a>
+		]
+	</td>
+
+	<td align=right>
+	<form action="https://www.paypal.com/cgi-bin/webscr" method="post">
+	<input type="hidden" name="cmd" value="_donations">
+	<input type="hidden" name="business" value="pgl@yoyo.org">
+	<input type="hidden" name="item_name" value="Peter Lowe's ad server list">
+	<input type="hidden" name="no_shipping" value="0">
+	<input type="hidden" name="return" value="https://pgl.yoyo.org/adservers/thanks.php">
+	<input type="hidden" name="no_note" value="1">
+	<input type="hidden" name="currency_code" value="EUR">
+	<input type="hidden" name="tax" value="0">
+	<input type="hidden" name="lc" value="MT">
+	<input type="hidden" name="bn" value="PP-DonationsBF">
+	<input type="image" src="/images/donate.gif" height=15 border="0" name="submit" alt="donate via PayPal">
+	</form>
+	</td>
+
+	</tr>
+
+	</table>
+</td></tr>
+
+<tr><td class=pagetitle>
+<b class=red>Ad and tracking server domain list - which hostnames are included and why</b>
+</td></tr>
+
+<tr><td class=sectionhead>
+Domains included in the list are:
+</td></tr>
+
+<tr><td class=section>
+<ul>
+<li>Highest level domains only (ie, doubleclick.net, not ad.doubleclick.net)
+<li>Not only ad servers - spyware servers, hit tracking servers, and servers that enable these technologies
+<li>Other nasty hostnames are included such as some malware domains etc.
+<li>Checked by hand before being added when <a href="index.php#submit.php">submitted</a> by a user
+<li><a href="news.php#validation">Automatically checked weekly to see if they're still valid</a>
+</ul>
+</td></tr>
+
+<tr><td class=sectionhead>
+Types of servers that will be listed:
+</td></tr>
+
+<tr><td class=section>
+<ul>
+<li><b><i>ad servers</i></b> - servers primarily used for serving up ads
+<li><b><i>tracking servers</i></b> - any server that is primarily used for users' actions or enabling it
+<li><b><i>malware servers</i></b> - servers contacted by viruses, spyware, or other nasty things that routinely attack and/or hijack your computer and its resources
+<li><b><i>anti-adblock servers</i></b> - servers primarily used for blocking adblock technologies
+<li><b><i>spam servers</i></b> - occassionally I'll add a server that is causing a huge amount of spam, but very rarely
+<li><b><i>other nasty stuff</i></b> - at my discretion, anything else that negatively impacts users
+</ul>
+
+<br>
+"Dedicated" here means, the primary purpose of the server.
+</td></tr>
+
+<tr><td class=sectionhead>
+List integrity: hostname validation + delisting
+</td></tr>
+
+<tr><td class=section>
+<li>hostnames are checked automatically every Friday at 12:00 for validity
+<li>entries that for some reason fail a DNS lookup are hidden from the list
+<li>entries that fail DNS lookups for 6 consecutive checks are removed from the list permanently
+<li>while I make every effort to ensure that all entries in the list meet the criteria detailed above, I am fallible: if I have made a mistake, please contact me: <a href="mailto:pgl@yoyo.org">pgl@yoyo.org</a>
+</td></tr>
+
+<tr><td class=section>
+If you have any questions, you can email me at <a href="mailto:pgl@yoyo.org">pgl@yoyo.org</a>.
+
+<br><br>
+<i>Please note that I may take a long time to get back to you: occasionally it will be months; my personal life dictates how much time I can spend on this project, and while it's easy to keep the list maintained it's a lot more time-consuming to look into and respond appropriately to all the emails I get regarding the list. However, I <b>will</b> respond eventually (unless I'm fatally involved in a low flying helicopter accident, or something! (Or perhaps my mail gets deleted, or it gets filtered into my junk mail folder, or... well, there's a lot of reasons why I might not get back to you, now I come to think about it. But, the point is, since <a href="http://web.archive.org/web/20011006143325/http://yoyo.org/~pgl/adservers/">at least 2001</a> I don't think I've ever not replied to a mail about the list)).</i>
+</td></tr>
+
+</table>
+
+</body>
+
+</html>

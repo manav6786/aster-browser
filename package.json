@@ -1,0 +1,82 @@
+{
+  "name": "aster-browser",
+  "productName": "Aster",
+  "version": "0.2.0",
+  "description": "A glassy personal browser with shared native agent control.",
+  "main": "src/main/index.cjs",
+  "private": true,
+  "license": "MIT",
+  "author": "Personal project",
+  "allowScripts": {
+    "electron": true,
+    "esbuild": true,
+    "app-builder-bin": true,
+    "@parcel/watcher": true
+  },
+  "scripts": {
+    "setup": "node node_modules/electron/install.js",
+    "start": "electron .",
+    "test": "node --test test/*.test.cjs",
+    "test:integration": "node scripts/integration.cjs",
+    "test:backend": "node scripts/backend-regression.cjs",
+    "test:ui": "node scripts/ui-regression.cjs",
+    "test:media": "node scripts/media-regression.cjs",
+    "test:shields": "node scripts/shields-regression.cjs",
+    "build:filters": "node scripts/build-filters.cjs",
+    "build": "electron-builder --mac dir --arm64",
+    "mcp": "node bin/aster-mcp.cjs",
+    "cli": "node bin/aster.cjs"
+  },
+  "dependencies": {
+    "@ghostery/adblocker-electron": "2.20.1",
+    "tldts-experimental": "7.4.19"
+  },
+  "devDependencies": {
+    "electron": "45.0.0",
+    "electron-builder": "26.15.3",
+    "playwright": "1.64.1",
+    "pngjs": "7.0.0"
+  },
+  "build": {
+    "appId": "dev.aster.browser",
+    "productName": "Aster",
+    "directories": {
+      "output": "dist",
+      "buildResources": "assets"
+    },
+    "files": [
+      "src/**/*",
+      "bin/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "extraResources": [
+      {
+        "from": "bin",
+        "to": "automation",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "assets/licenses",
+        "to": "licenses",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": "dir",
+      "identity": null,
+      "icon": "assets/icon.icns",
+      "extendInfo": {
+        "NSCameraUsageDescription": "A website can use the camera only after you allow it.",
+        "NSMicrophoneUsageDescription": "A website can use the microphone only after you allow it.",
+        "NSHighResolutionCapable": true
+      }
+    }
+  }
+}
