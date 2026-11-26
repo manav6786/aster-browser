@@ -43,7 +43,7 @@ function mainFixture(saved = {}) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'aster-main-test-'));
   const errors = [];
   const electron = {
-    app: { setName() {}, requestSingleInstanceLock: () => true, on() {}, getPath: () => directory, whenReady: () => new Promise(() => {}) },
+    app: { setName() {}, setAppUserModelId() {}, requestSingleInstanceLock: () => true, on() {}, getPath: () => directory, whenReady: () => new Promise(() => {}) },
     protocol: { registerSchemesAsPrivileged() {} }, WebContentsView: View,
     nativeTheme: {}, session: { fromPartition: () => ({ clearStorageData: async () => {}, clearCache: async () => {} }) }
   };
