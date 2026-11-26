@@ -7,6 +7,7 @@
 <p align="center">
   <a href="#download">Download Aster</a> ·
   <a href="#feature-tour">Feature tour</a> ·
+  <a href="#browser-automation">Browser automation</a> ·
   <a href="mobile/README.md">iOS and Android preview</a> ·
   <a href="CONTRIBUTING.md">Contribute</a>
 </p>
@@ -42,6 +43,23 @@ The tour loops inline when animated images are enabled in your GitHub accessibil
   <img src="docs/media/protection.webp" width="46%" alt="The protection panel showing blocked requests on the sample site">
   <img src="docs/media/media.webp" width="46%" alt="The tab’s Audio and video panel showing a volume slider and Picture in Picture button">
 </p>
+
+## Browser automation
+
+Several trusted tools can share the same Aster window through Model Context Protocol (MCP), a terminal client, or local HTTP. Each client targets a specific tab. A tab claim coordinates writes, and an ordered batch runs in that tab’s queue. The browser shows who is connected and what they’ve run.
+
+In a two-client check, one client claimed the selected tab. The second client’s write to it was rejected, then the second client performed a verified click in its own background tab while the first tab stayed selected.
+
+| Browser and control path | Click p50 / p95 | Fill and submit p50 / p95 |
+| --- | ---: | ---: |
+| **Aster 0.5.0 · local HTTP** | **2.36 / 6.90 ms** | **3.10 / 8.06 ms** |
+| Chrome · raw CDP | 0.78 / 2.34 ms | 1.84 / 7.73 ms |
+| Brave · raw CDP | 0.78 / 2.54 ms | 1.77 / 7.39 ms |
+| Safari · WebDriver or MCP | — | — |
+
+The median (p50) and 95th percentile (p95) cover 180 verified trials per task and browser on one Mac. Direct CDP took about a third of Aster’s median click time and 57–60% of its median form time on this fixture. Safari timing requires its local automation opt-in. These figures measure local automation latency on a ready page.
+
+[Connect a local tool](docs/local-automation.md) · [Benchmark method and browser control options](docs/browser-control-benchmark.md)
 
 ## Run from source
 
