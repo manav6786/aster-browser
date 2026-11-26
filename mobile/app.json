@@ -1,0 +1,23 @@
+{
+  "expo": {
+    "name": "Aster",
+    "slug": "aster-browser",
+    "version": "0.1.0",
+    "icon": "./assets/icon.png",
+    "backgroundColor": "#090810",
+    "ios": {
+      "bundleIdentifier": "com.manavharsora.asterbrowser",
+      "buildNumber": "1",
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "com.manavharsora.asterbrowser",
+      "versionCode": 1,
+      "predictiveBackGestureEnabled": true,
+      "adaptiveIcon": {
+        "backgroundColor": "#090810",
+        "foregroundImage": "./assets/adaptive-icon.png"
+      }
+    }
+  }
+}
